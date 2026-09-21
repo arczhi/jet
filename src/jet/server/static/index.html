@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>jet</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d0f13'/%3E%3Cpath d='M9 8l7 8-7 8' stroke='%235a9cf8' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M16 24h7' stroke='%235a9cf8' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">›_</span>
+      <span class="wordmark">jet</span>
+      <span class="session" id="session-id" title="">—</span>
+      <span class="conn" id="conn" title="service connection"><span class="conn-dot"></span></span>
+    </div>
+    <div class="models" id="models">—</div>
+    <div class="topbar-actions">
+      <div class="segmented" id="approval-mode" role="group" aria-label="Approval mode">
+        <button data-mode="ask" class="active">Ask</button>
+        <button data-mode="auto">Auto</button>
+        <button data-mode="deny">Deny</button>
+      </div>
+      <button class="ghost" id="new-session" title="Start a new session">New session</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="transcript-pane">
+      <div class="transcript" id="transcript">
+        <div class="empty" id="empty">
+          <div class="empty-mark">›_</div>
+          <h1>jet</h1>
+          <p class="empty-lede">A fast coding agent for this workspace. It plans, acts in
+             small verified steps, and shows you exactly what context it chose to see.</p>
+          <div class="starters">
+            <button class="starter" data-task="Explain the architecture of src/jet/ in a few paragraphs.">Explain the architecture of src/jet/</button>
+            <button class="starter" data-task="Find every TODO and FIXME in this codebase and summarize them by theme.">Summarize all TODOs by theme</button>
+            <button class="starter" data-task="Read README.md and suggest concrete improvements.">Review README.md</button>
+          </div>
+          <p class="hint"><kbd>⌘↵</kbd> send · <kbd>⌘.</kbd> stop · approvals appear as dialogs</p>
+        </div>
+      </div>
+      <button class="jump" id="jump" hidden title="Jump to latest">↓ latest</button>
+      <footer class="composer">
+        <div class="composer-box">
+          <textarea id="input" rows="1" placeholder="Ask jet to do something in this workspace…" spellcheck="false"></textarea>
+          <div class="composer-actions">
+            <span class="kbd-hint"><kbd>⌘↵</kbd></span>
+            <button id="stop" class="danger" hidden>Stop</button>
+            <button id="send" class="primary">Send</button>
+          </div>
+        </div>
+      </footer>
+    </section>
+
+    <aside class="sidebar">
+      <nav class="tabs" id="tabs">
+        <button data-tab="plan" class="active">Plan</button>
+        <button data-tab="context">Context</button>
+        <button data-tab="session">Session</button>
+      </nav>
+      <div class="tab-panel active" id="panel-plan">
+        <p class="muted" id="plan-empty">No plan yet. jet decomposes the task on the first turn.</p>
+        <ul class="plan" id="plan"></ul>
+      </div>
+      <div class="tab-panel" id="panel-context">
+        <div class="stat-row" id="context-stats"></div>
+        <table class="views" id="views">
+          <thead><tr><th>level</th><th>kind</th><th>source</th><th class="num">tok</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="muted" id="context-empty">No context assembled yet.</p>
+      </div>
+      <div class="tab-panel" id="panel-session">
+        <dl class="kv">
+          <dt>generator</dt><dd id="s-gen">—</dd>
+          <dt>verifier</dt><dd id="s-ver">—</dd>
+          <dt>judge</dt><dd id="s-judge">—</dd>
+          <dt>workspace</dt><dd id="s-workspace">—</dd>
+          <dt>chunks</dt><dd id="s-chunks">—</dd>
+          <dt>tokens</dt><dd id="s-usage">—</dd>
+          <dt>cost</dt><dd id="s-cost">—</dd>
+          <dt>session</dt><dd id="s-session" class="mono">—</dd>
+          <dt>trace</dt><dd id="s-trace" class="mono path">—</dd>
+        </dl>
+        <h3 class="section-title">Recent chunks</h3>
+        <ul class="recent" id="s-recent"></ul>
+        <div class="sidebar-actions">
+          <button class="ghost" id="refresh-state">Refresh</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <div class="modal-backdrop" id="approval-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="approval-title">
+      <h2 id="approval-title">Approval needed</h2>
+      <p class="approval-tool" id="approval-tool"></p>
+      <pre class="approval-args" id="approval-args"></pre>
+      <p class="approval-reason" id="approval-reason"></p>
+      <div class="modal-actions">
+        <button class="ghost" id="approval-deny">Deny</button>
+        <button class="primary" id="approval-allow">Allow</button>
+      </div>
+      <p class="hint"><kbd>y</kbd> allow · <kbd>n</kbd>/<kbd>esc</kbd> deny · this decision is final for this action</p>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
