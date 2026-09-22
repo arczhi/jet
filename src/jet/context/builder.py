@@ -56,13 +56,15 @@ class ContextBuilder:
         verbatim: list[Message],
     ) -> ContextPlan:
         system_tokens = estimate_tokens(system_prompt)
-        verbatim_tokens = sum(estimate_tokens(message.content) for message in verbatim)
-        available = self.budget_tokens - system_tokens - verbatim_tokens
-        if available <= 0:
+        if system_tokens >= self.budget_tokens:
             raise ValueError(
-                "context budget is smaller than the fixed prompt and recent turns; "
-                "raise JET_CONTEXT_BUDGET_TOKENS"
+                "context budget is smaller than the system prompt; raise JET_CONTEXT_BUDGET_TOKENS"
             )
+        available = self.budget_tokens - system_tokens
+
+        blocks = _message_blocks(verbatim)
+        kept, dropped = _pack_from_end(blocks, available)
+        verbatim_tokens = sum(estimate_tokens(message.content) for message in kept)
 
         result = await self.attention.rank(task=task, chunks=chunks)
         selected: list[AttentionView] = []
@@ -70,32 +72,79 @@ class ContextBuilder:
         ordered = sorted(result.views, key=lambda view: (VIEW_ORDER[view.level], view.chunk.seq))
         for view in ordered:
             cost = estimate_tokens(view.rendered) + 8
-            if used + cost > available:
+            if used + cost > available - verbatim_tokens:
                 continue
             selected.append(view)
             used += cost
 
         selected.sort(key=lambda view: view.chunk.seq)
-        memory = _render_memory(self.memory_header, selected, hidden_count=len(result.hidden))
+        memory = _render_memory(self.memory_header, selected, hidden_count=len(result.hidden), task=task)
         messages: list[Message] = []
         if system_prompt:
             messages.append(Message.system(system_prompt))
         if memory:
             messages.append(Message.user(memory))
-        messages.extend(verbatim)
+        messages.extend(kept)
         return ContextPlan(
             messages=messages,
             views=selected,
             hidden=result.hidden,
             tokens=system_tokens + estimate_tokens(memory) + verbatim_tokens,
-            counts={**summarize_views(selected), "hidden": len(result.hidden)},
+            counts={**summarize_views(selected), "hidden": len(result.hidden), "dropped_verbatim": dropped},
         )
 
 
-def _render_memory(header: str, views: list[AttentionView], *, hidden_count: int) -> str:
-    if not views and not hidden_count:
+def _message_blocks(messages: list[Message]) -> list[list[Message]]:
+    """Group messages into protocol-safe blocks.
+
+    An assistant message carrying tool_calls opens a block that stays open
+    through its tool results; the pair is kept or dropped together.
+    """
+    blocks: list[list[Message]] = []
+    current: list[Message] = []
+    for message in messages:
+        if message.role.value == "tool":
+            current.append(message)
+            continue
+        if current:
+            blocks.append(current)
+        current = [message]
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def _pack_from_end(blocks: list[list[Message]], budget: int) -> tuple[list[Message], int]:
+    """Keep the most recent blocks that fit; the newest block is mandatory."""
+    if not blocks:
+        return [], 0
+    last_tokens = sum(estimate_tokens(m.content) for m in blocks[-1])
+    if last_tokens > budget:
+        raise ValueError("context budget cannot fit the current turn; raise JET_CONTEXT_BUDGET_TOKENS")
+    kept: list[Message] = []
+    used = 0
+    dropped = 0
+    for block in reversed(blocks):
+        cost = sum(estimate_tokens(m.content) for m in block)
+        if not kept:
+            kept = list(block)
+            used = cost
+            continue
+        if used + cost <= budget:
+            kept = list(block) + kept
+            used += cost
+        else:
+            dropped += 1
+    return kept, dropped
+
+
+def _render_memory(header: str, views: list[AttentionView], *, hidden_count: int, task: str = "") -> str:
+    if not views and not hidden_count and not task:
         return ""
     lines: list[str] = [f"## {header}", ""]
+    if task:
+        lines.append(f"### [goal · full]\n{task}")
+        lines.append("")
     for view in views:
         chunk = view.chunk
         title = LEVEL_TITLES[view.level]

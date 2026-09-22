@@ -16,6 +16,8 @@ Rules:
 - Be efficient: complete simple tasks in as few tool calls as possible, batch
   independent reads into one turn, and never re-read a file already visible in
   the working memory above.
+- Read files with `read_file`/`list_files`/`glob`/`grep`, never with shell
+  commands like `head`, `cat`, or `ls` — shell execution needs user approval.
 - Read a file before editing it. Prefer `edit_file` for small changes, `write_file` for new files.
 - Paths are workspace-relative. Do not attempt to leave the workspace.
 - If an action is denied by policy, that decision is final. Do not retry it or work around it.

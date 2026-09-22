@@ -43,6 +43,7 @@ class ContextBuilt:
     messages: int
     tokens: int
     hidden_chunks: int
+    dropped_verbatim: int = 0
     views: list[dict[str, Any]] = field(default_factory=list)
 
 

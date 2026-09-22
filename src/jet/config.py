@@ -21,7 +21,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -101,7 +101,12 @@ class Settings(BaseSettings):
     # judgment model (fast System One decisions)
     judge_provider: Literal["typesafe", "openai_compat", "mock"] = "typesafe"
     typesafe_base_url: str = "https://api.typesafe.ai"
-    typesafe_api_key: str | None = None
+    # Aliased so an existing plain TYPESAFE_API_KEY in the shell just works;
+    # the canonical, prefixed name is JET_TYPESAFE_API_KEY.
+    typesafe_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("JET_TYPESAFE_API_KEY", "TYPESAFE_API_KEY"),
+    )
     typesafe_model: str = "jev-latest"
     judge_openai_base_url: str = "http://127.0.0.1:8080/v1"
     judge_openai_api_key: str | None = None

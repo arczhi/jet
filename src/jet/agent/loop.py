@@ -13,6 +13,7 @@ loop continues until the step budget runs out.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
@@ -144,6 +145,7 @@ class Agent:
         if not task:
             raise ValueError("run_turn requires a non-empty task")
         self.emit(TurnStarted(task=task))
+        turn_start_count = self.state.store.count()
         user_chunk = self.state.store.add(ChunkKind.USER_MESSAGE, task)
         self.emit(ChunkAdded(chunk=user_chunk))
         loaded = self.memory.load_root()
@@ -163,24 +165,31 @@ class Agent:
             steps += 1
             self.emit(StepStarted(step=steps))
             current_goal = self._current_goal(task, subgoals)
-            plan = await self.builder.build(
-                system_prompt=self._system_prompt(),
-                task=current_goal,
-                chunks=self.state.store.all(),
-                verbatim=list(self.state.turn_messages),
+            # Memory carries pre-turn state plus anything accumulated outside the
+            # conversation (memory files, subgoals); this turn's own messages stay
+            # verbatim and are never duplicated into memory.
+            candidates = [
+                chunk
+                for chunk in self.state.store.all()
+                if chunk.seq <= turn_start_count or chunk.kind in (ChunkKind.MEMORY, ChunkKind.SUBGOAL)
+            ]
+            plan, selected = await asyncio.gather(
+                self.builder.build(
+                    system_prompt=self._system_prompt(),
+                    task=current_goal,
+                    chunks=candidates,
+                    verbatim=list(self.state.turn_messages),
+                ),
+                self.selector.select(task=current_goal, registry=self.registry, context=task),
             )
             self.emit(
                 ContextBuilt(
                     messages=len(plan.messages),
                     tokens=plan.tokens,
                     hidden_chunks=len(plan.hidden),
+                    dropped_verbatim=plan.counts.get("dropped_verbatim", 0),
                     views=render_view_table(plan.views),
                 )
-            )
-            selected = await self.selector.select(
-                task=current_goal,
-                registry=self.registry,
-                context=task,
             )
             try:
                 response = await self._stream(plan.messages, selected)

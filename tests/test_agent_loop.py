@@ -192,9 +192,39 @@ async def test_context_is_rebuilt_from_chunks_on_later_steps(settings: Settings)
     await agent.run_turn("read a.txt")
     contexts = [event for event in events if isinstance(event, ContextBuilt)]
     assert len(contexts) == 2
-    assert contexts[1].views, "second step should show selected chunk views"
-    assert any(view["kind"] == "tool_result" for view in contexts[1].views)
+    # Fresh session: only pinned memory is pre-turn state; this turn's own
+    # messages never re-enter memory and nothing was dropped.
+    assert all(view["kind"] == "memory" for view in contexts[1].views)
+    assert contexts[1].dropped_verbatim == 0
     await agent.aclose()
+
+
+async def test_memory_covers_prior_turns_on_a_follow_up(settings: Settings) -> None:
+    """A second turn sees the first turn's chunks through RLCD attention."""
+    first_llm = make_llm(
+        MockTurn(tool_calls=[ToolCall("c1", "read_file", {"path": "a.txt"})]), MockTurn(text="read it")
+    )
+    agent = build(settings, llm=first_llm)
+    await agent.run_turn("read a.txt")
+    await agent.aclose()
+
+    events, sink = collect_events()
+    second_llm = make_llm(
+        MockTurn(tool_calls=[ToolCall("c2", "read_file", {"path": "a.txt"})]),
+        MockTurn(text="done"),
+    )
+    agent2 = build(settings, llm=second_llm, emit=sink, session_id=agent.session_id)
+    try:
+        await agent2.run_turn("read a.txt again")
+        contexts = [event for event in events if isinstance(event, ContextBuilt)]
+        assert any(view["kind"] == "tool_result" for view in contexts[0].views)
+        # Contexts within turn 2 must carry only pre-turn state (turn 1's
+        # chunks) plus pinned memory; turn 2's own results travel in verbatim.
+        seqs = {view["seq"] for view in contexts[1].views}
+        assert 8 not in seqs, "turn 2's own tool result leaked into memory"
+        assert 4 in seqs, "turn 1's tool result should be in memory"
+    finally:
+        await agent2.aclose()
 
 
 async def test_resumed_session_reuses_prior_chunks(settings: Settings) -> None:

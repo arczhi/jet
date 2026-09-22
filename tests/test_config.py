@@ -36,6 +36,13 @@ def test_env_overrides_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.llm_model == "deepseek-v4.1-flash"
 
 
+def test_typesafe_key_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TYPESAFE_API_KEY", "apikey_alias")
+    assert Settings().typesafe_api_key == "apikey_alias"
+    monkeypatch.setenv("JET_TYPESAFE_API_KEY", "apikey_prefixed")
+    assert Settings().typesafe_api_key == "apikey_prefixed"
+
+
 def test_toml_file_is_read(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config = write_toml(
         tmp_path / "jet.toml",
