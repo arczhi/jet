@@ -7,6 +7,7 @@ usage accounting.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,8 @@ from jet.core.events import (
     TurnStarted,
     Verified,
 )
-from jet.core.types import ChunkKind, ToolCall
+from jet.core.types import ChunkKind, GoalStatus, SubGoal, ToolCall
+from jet.errors import ProviderError
 from jet.providers.mock import MockTurn
 from tests.conftest import NullDecomposer, collect_events, make_judge, make_llm
 
@@ -66,7 +68,84 @@ async def test_simple_answer_is_verified_and_persisted(settings: Settings) -> No
     assert any(isinstance(event, ContextBuilt) for event in events)
     assert any(isinstance(event, AssistantMessage) for event in events)
     assert any(isinstance(event, Verified) for event in events)
+    verification_chunks = agent.store.by_kind(ChunkKind.VERIFICATION)
+    assert len(verification_chunks) == 1
+    assert verification_chunks[0].meta["satisfied"] is True
+    assert verification_chunks[0].meta["conclusive"] is True
+    trace_events = [json.loads(line) for line in agent.trace.path.read_text().splitlines()]
+    assert any(event["event"] == "verification.persisted" for event in trace_events)
     assert isinstance(events[-1], TurnFinished)
+    await agent.aclose()
+
+
+class OneSubgoal:
+    def __init__(self, store: Any) -> None:
+        self.store = store
+
+    async def decompose(self, goal: str, **_: Any) -> list[SubGoal]:
+        chunk = self.store.add(
+            ChunkKind.SUBGOAL,
+            "read a.txt",
+            status=GoalStatus.PENDING,
+            meta={"depth": 0, "goal": goal},
+        )
+        return [
+            SubGoal(
+                id=chunk.id,
+                text=chunk.content,
+                parent_id=None,
+                depth=0,
+                status=GoalStatus.PENDING,
+                chunk_id=chunk.id,
+            )
+        ]
+
+
+async def test_successful_verification_completes_subgoals_and_persists_verdict(
+    settings: Settings,
+) -> None:
+    agent = build(
+        settings,
+        llm=make_llm(
+            MockTurn(tool_calls=[ToolCall("c1", "read_file", {"path": "a.txt"})]),
+            MockTurn(text="Read a.txt successfully."),
+        ),
+    )
+    agent.decomposer = OneSubgoal(agent.store)
+    result = await agent.run_turn("read a.txt")
+
+    assert result.verification is not None and result.verification.satisfied
+    subgoal = agent.store.by_kind(ChunkKind.SUBGOAL)[0]
+    assert subgoal.status is GoalStatus.DONE
+    verdict = agent.store.by_kind(ChunkKind.VERIFICATION)[-1]
+    assert verdict.meta["completed_subgoal_ids"] == [subgoal.id]
+    assert verdict.meta["subgoal_statuses"][subgoal.id] == GoalStatus.DONE.value
+    assert verdict.meta["final"] is True
+    await agent.aclose()
+
+
+async def test_inconclusive_verification_does_not_complete_subgoals(settings: Settings) -> None:
+    def fail_verification(state: Any, _question: Any) -> float:
+        if isinstance(state, dict) and "evidence" in state:
+            raise ProviderError("judge unavailable")
+        return 0.9
+
+    agent = build(
+        settings.model_copy(update={"verifier_provider": "judge"}),
+        llm=make_llm(MockTurn(text="I think it is done.")),
+        judge=make_judge(on_noul=fail_verification),
+    )
+    agent.decomposer = OneSubgoal(agent.store)
+    result = await agent.run_turn("read a.txt")
+
+    assert result.stopped_reason == "done"
+    assert result.verification is not None and not result.verification.conclusive
+    subgoal = agent.store.by_kind(ChunkKind.SUBGOAL)[0]
+    assert subgoal.status is GoalStatus.PENDING
+    verdict = agent.store.by_kind(ChunkKind.VERIFICATION)[-1]
+    assert verdict.meta["conclusive"] is False
+    assert verdict.meta["subgoal_statuses"][subgoal.id] == GoalStatus.PENDING.value
+    assert verdict.meta["completed_subgoal_ids"] == []
     await agent.aclose()
 
 

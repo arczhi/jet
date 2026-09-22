@@ -1,4 +1,4 @@
-> 感谢作者提供的思路：[Thoughts on a TypeSafe coding agent](https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/edit?tab=t.0)。jet 在此基础上将“显式状态、轻量判断模型、按需构建上下文”等想法落实成了一个可运行的 coding agent。
+> Thanks to the author for sharing the ideas in [Thoughts on a TypeSafe coding agent](https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/edit?tab=t.0). Building on this work, jet turns ideas such as explicit state, a lightweight judgment model, and on-demand context construction into a runnable coding agent.
 
 <p align="center">
   <img src="docs/logo.svg" alt="jet logo" width="84" />
@@ -74,11 +74,9 @@ probed on save, and everything stays on your machine.
 
 ## Architecture
 
-```text
-input -> context assembly (RLCD) -> routing -> generation -> tool policy -> execution
-             ^                                              |
-             +------------ chunks / judgments <--------------+
-```
+<p align="center">
+  <img src="docs/architecture.svg" alt="jet runtime architecture" width="100%" />
+</p>
 
 - `providers/` — plugin contract for judgment models and LLMs
 - `context/` — chunk store, recursive decomposition, meta-attention,

@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">jet coding agent architecture</title>
+  <desc id="desc">A hand-drawn dark architecture diagram showing the jet coding agent loop: input enters a turn manager, context is rebuilt from persistent chunks, a fast judge routes work to a generator model, policy gates tools, and verification either finishes or feeds an explicit note back into the next step.</desc>
+  <defs>
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow-teal" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M1,1 L9,5 L1,9" fill="none" stroke="#7dd3c7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arrow-coral" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M1,1 L9,5 L1,9" fill="none" stroke="#f0a58a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arrow-lavender" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M1,1 L9,5 L1,9" fill="none" stroke="#b9a7e8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      .title { font: 700 30px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: .02em; fill: #f5f1e8; }
+      .subtitle { font: 400 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #9da8ad; }
+      .eyebrow { font: 700 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: .16em; fill: #7dd3c7; }
+      .label { font: 700 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f5f1e8; }
+      .small { font: 400 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #b7c0c1; }
+      .tiny { font: 400 11px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #879398; }
+      .container { fill: #11191d; stroke: #34464a; stroke-width: 1.5; stroke-dasharray: 7 8; }
+      .node { fill: #182327; stroke: #657276; stroke-width: 1.5; }
+      .node-teal { fill: #142a2b; stroke: #5aaea4; stroke-width: 1.5; }
+      .node-coral { fill: #2a211e; stroke: #d38e77; stroke-width: 1.5; }
+      .node-lavender { fill: #211e2d; stroke: #9f8dcc; stroke-width: 1.5; }
+      .node-amber { fill: #29261d; stroke: #cbb875; stroke-width: 1.5; }
+      .path-teal { fill: none; stroke: #7dd3c7; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow-teal); }
+      .path-coral { fill: none; stroke: #f0a58a; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow-coral); }
+      .path-lavender { fill: none; stroke: #b9a7e8; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow-lavender); }
+      .path-muted { fill: none; stroke: #64757a; stroke-width: 1.5; stroke-dasharray: 5 6; stroke-linecap: round; stroke-linejoin: round; }
+      .scribble { fill: none; stroke: #7dd3c7; stroke-width: 1.2; opacity: .5; stroke-linecap: round; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="760" rx="26" fill="#0b1012"/>
+  <path d="M48 91 C220 87 365 94 528 90 S875 94 1152 89" class="scribble" opacity=".3"/>
+  <text x="52" y="78" class="title">A small judge keeps the big model focused.</text>
+
+  <!-- Entry points -->
+  <g>
+    <rect x="52" y="124" width="190" height="106" rx="18" class="node"/>
+    <text x="76" y="181" class="label">User task</text>
+    <text x="76" y="204" class="small">CLI · app · API</text>
+  </g>
+  <path d="M242 177 C258 177 262 177 280 177" class="path-teal"/>
+
+  <g>
+    <rect x="280" y="124" width="194" height="106" rx="18" class="node-teal"/>
+    <text x="304" y="181" class="label">TurnManager</text>
+    <text x="304" y="204" class="small">owns the turn</text>
+  </g>
+  <path d="M474 177 C493 177 499 177 518 177" class="path-teal"/>
+
+  <!-- Main loop -->
+  <rect x="518" y="112" width="630" height="548" rx="26" class="container"/>
+
+  <!-- Context and judge -->
+  <g>
+    <rect x="548" y="202" width="178" height="148" rx="16" class="node-teal"/>
+    <text x="572" y="277" class="label">RLCD assembly</text>
+    <text x="572" y="303" class="small">rebuild context</text>
+  </g>
+  <path d="M726 276 C741 276 747 276 764 276" class="path-teal"/>
+
+  <g>
+    <rect x="764" y="202" width="178" height="148" rx="16" class="node-lavender"/>
+    <text x="788" y="277" class="label">Fast judgment</text>
+    <text x="788" y="303" class="small">route and plan</text>
+  </g>
+  <path d="M942 276 C957 276 965 276 981 276" class="path-lavender"/>
+
+  <g>
+    <rect x="981" y="202" width="137" height="148" rx="16" class="node-coral"/>
+    <text x="1005" y="277" class="label">Generator LLM</text>
+    <text x="1005" y="303" class="small">answer or act</text>
+  </g>
+
+  <!-- Lower execution lane -->
+  <path d="M1049 350 C1049 370 1049 379 1049 397" class="path-coral"/>
+  <g>
+    <rect x="764" y="397" width="178" height="126" rx="16" class="node-amber"/>
+    <text x="788" y="467" class="label">Policy gate</text>
+    <text x="788" y="492" class="small">rules before advice</text>
+  </g>
+  <path d="M942 460 C957 460 965 460 981 460" class="path-coral"/>
+  <g>
+    <rect x="981" y="397" width="137" height="126" rx="16" class="node"/>
+    <text x="1005" y="467" class="label">Tools</text>
+    <text x="1005" y="492" class="small">workspace actions</text>
+  </g>
+  <path d="M850 350 C850 368 850 377 850 397" class="path-lavender"/>
+
+  <!-- Verification and loop back -->
+  <path d="M981 523 C954 552 924 563 892 570" class="path-coral"/>
+  <g>
+    <rect x="548" y="552" width="178" height="78" rx="16" class="node-lavender"/>
+    <text x="572" y="603" class="label">Verify evidence</text>
+    <text x="572" y="622" class="small">check the result</text>
+  </g>
+  <path d="M764 591 C748 591 742 591 726 591" class="path-lavender"/>
+  <g>
+    <rect x="764" y="552" width="178" height="78" rx="16" class="node-teal"/>
+    <text x="788" y="603" class="label">Done or retry</text>
+    <text x="788" y="622" class="small">bounded feedback</text>
+  </g>
+  <path d="M637 552 C631 493 633 410 637 350" class="path-lavender"/>
+
+  <!-- Durable state rail -->
+  <g>
+    <rect x="52" y="292" width="422" height="338" rx="22" class="container"/>
+    <text x="80" y="350" class="label">Durable state</text>
+    <text x="80" y="372" class="small">facts survive each step</text>
+    <rect x="80" y="382" width="178" height="94" rx="14" class="node-teal"/>
+    <text x="102" y="437" class="label">ChunkStore</text>
+    <text x="102" y="460" class="small">typed history</text>
+    <rect x="278" y="382" width="168" height="94" rx="14" class="node"/>
+    <text x="300" y="437" class="label">AGENTS.md</text>
+    <text x="300" y="460" class="small">path memory</text>
+    <rect x="80" y="500" width="178" height="94" rx="14" class="node-lavender"/>
+    <text x="102" y="555" class="label">Trace</text>
+    <text x="102" y="578" class="small">audit trail</text>
+    <rect x="278" y="500" width="168" height="94" rx="14" class="node"/>
+    <text x="300" y="555" class="label">Cache</text>
+    <text x="300" y="578" class="small">reuse decisions</text>
+  </g>
+
+  <!-- State connections -->
+  <path d="M474 425 C500 425 514 333 548 300" class="path-muted"/>
+  <path d="M474 548 C505 548 524 584 548 584" class="path-muted"/>
+  <path d="M242 430 C259 430 263 430 278 430" class="path-muted"/>
+</svg>

@@ -172,6 +172,7 @@ class Agent:
         subgoals: list[SubGoal] = []
 
         verification_failures = 0
+        verification_attempt = 0
         while steps < self.settings.max_steps:
             steps += 1
             self.emit(StepStarted(step=steps))
@@ -244,11 +245,24 @@ class Agent:
                 verification = await self.verifier.verify(
                     goal=task, answer=final_text, evidence=self._evidence(), mode="judge"
                 )
+                verification_attempt += 1
                 self.emit(Verified(verification=verification))
-                if verification.satisfied or not verification.conclusive:
-                    # Inconclusive (e.g. judge outage) must not spin a retry
-                    # loop: the answer stands, with the degradation reported.
-                    self._complete_subgoals(subgoals)
+                verification_subgoals = subgoals or self._active_subgoals()
+                verification_success = verification.satisfied and verification.conclusive
+                if verification_success or not verification.conclusive:
+                    # An inconclusive result may end the turn, but it is not
+                    # proof that the active subgoals are complete.
+                    completed = (
+                        self._complete_subgoals(verification_subgoals) if verification_success else []
+                    )
+                    self._record_verification(
+                        task=task,
+                        verification=verification,
+                        subgoals=verification_subgoals,
+                        attempt=verification_attempt,
+                        final=True,
+                        completed_subgoal_ids=completed,
+                    )
                     stopped = "done"
                     break
                 verification_failures += 1
@@ -265,10 +279,34 @@ class Agent:
                             ),
                         )
                     )
+                    self._record_verification(
+                        task=task,
+                        verification=verification,
+                        subgoals=verification_subgoals,
+                        attempt=verification_attempt,
+                        final=True,
+                        completed_subgoal_ids=[],
+                    )
                     break
                 if steps >= self.settings.max_steps:
                     stopped = "max_steps"
+                    self._record_verification(
+                        task=task,
+                        verification=verification,
+                        subgoals=verification_subgoals,
+                        attempt=verification_attempt,
+                        final=True,
+                        completed_subgoal_ids=[],
+                    )
                     break
+                self._record_verification(
+                    task=task,
+                    verification=verification,
+                    subgoals=verification_subgoals,
+                    attempt=verification_attempt,
+                    final=False,
+                    completed_subgoal_ids=[],
+                )
                 self._add_note(
                     VERIFICATION_RETRY.format(goal=task, reason=verification.reason),
                     meta={"kind": "verification_retry"},
@@ -393,11 +431,55 @@ class Agent:
                 self.state.store.update_status(subgoal.chunk_id, GoalStatus.RUNNING)
                 return
 
-    def _complete_subgoals(self, subgoals: list[SubGoal]) -> None:
+    def _complete_subgoals(self, subgoals: list[SubGoal]) -> list[str]:
+        completed: list[str] = []
         for subgoal in subgoals:
             if subgoal.status in (GoalStatus.PENDING, GoalStatus.RUNNING):
                 subgoal.status = GoalStatus.DONE
                 self.state.store.update_status(subgoal.chunk_id, GoalStatus.DONE)
+                completed.append(subgoal.chunk_id)
+        return completed
+
+    def _record_verification(
+        self,
+        *,
+        task: str,
+        verification: Verification,
+        subgoals: list[SubGoal],
+        attempt: int,
+        final: bool,
+        completed_subgoal_ids: list[str],
+    ) -> None:
+        """Persist every verdict and make the terminal verdict queryable."""
+        active_subgoal_ids = [
+            subgoal.chunk_id
+            for subgoal in subgoals
+            if subgoal.status in (GoalStatus.PENDING, GoalStatus.RUNNING, GoalStatus.DONE)
+        ]
+        fields = {
+            "goal": task,
+            "attempt": attempt,
+            "satisfied": verification.satisfied,
+            "confidence": verification.confidence,
+            "conclusive": verification.conclusive,
+            "verifier": verification.verifier,
+            "reason": verification.reason,
+            "final": final,
+            "subgoal_ids": active_subgoal_ids,
+            "subgoal_statuses": {subgoal.chunk_id: subgoal.status.value for subgoal in subgoals},
+            "completed_subgoal_ids": completed_subgoal_ids,
+        }
+        self.trace.event("verification.verdict", **fields)
+        if not final:
+            return
+        chunk = self.store.add(
+            ChunkKind.VERIFICATION,
+            verification.reason,
+            source=verification.verifier,
+            meta=fields,
+        )
+        self.emit(ChunkAdded(chunk=chunk))
+        self.trace.event("verification.persisted", verification_chunk_id=chunk.id, **fields)
 
     # -- generation --------------------------------------------------------
 
