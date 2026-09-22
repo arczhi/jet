@@ -44,6 +44,9 @@
     .navlinks { display: flex; gap: 22px; color: var(--muted); font-size: 13px; }
     .navlinks a { text-decoration: none; }
     .navlinks a:hover, .navlinks a:focus { color: var(--blue); }
+    .lang-tabs { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; }
+    .lang-tab { border: 0; border-radius: 999px; padding: 6px 10px; color: var(--muted); background: transparent; cursor: pointer; font: 700 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .lang-tab[aria-selected="true"] { color: white; background: var(--blue-dark); }
     .hero { padding: 76px 0 90px; display: grid; grid-template-columns: 1.04fr .96fr; gap: 60px; align-items: center; }
     .kicker { color: var(--blue); font: 700 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .14em; text-transform: uppercase; }
     h1, h2, h3 { margin: 0; letter-spacing: -.055em; line-height: 1.04; }
@@ -129,11 +132,12 @@
 </head>
 <body>
   <div class="topline"></div>
-  <div class="credit">感谢作者提供的思路：<a href="https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/edit?tab=t.0" target="_blank" rel="noreferrer">Thoughts on a TypeSafe coding agent</a>。本文把它转译成 jet 当前实现的通俗说明。</div>
+  <div class="credit"><span data-i18n="credit">Thanks to the author of <a href="https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/edit?tab=t.0" target="_blank" rel="noreferrer">Thoughts on a TypeSafe coding agent</a>. This guide translates those ideas into jet's current implementation.</span></div>
   <header class="shell">
     <nav aria-label="主导航">
       <a class="brand" href="#top"><img src="logo.svg" alt="jet logo">jet / DESIGN NOTES</a>
-      <div class="navlinks"><a href="#flow">一次请求</a><a href="#context">上下文</a><a href="#safety">安全</a><a href="#map">代码地图</a></div>
+      <div class="navlinks"><a href="#flow" data-i18n="nav-flow">One request</a><a href="#context" data-i18n="nav-context">Context</a><a href="#safety" data-i18n="nav-safety">Safety</a><a href="#map" data-i18n="nav-map">Code map</a></div>
+      <div class="lang-tabs" role="tablist" aria-label="Language"><button class="lang-tab" type="button" role="tab" data-lang="en" aria-selected="true">EN</button><button class="lang-tab" type="button" role="tab" data-lang="zh" aria-selected="false">中文</button></div>
     </nav>
   </header>
 
@@ -141,62 +145,104 @@
     <section class="shell hero">
       <div>
         <div class="kicker">A visual technical guide · v0.1</div>
-        <h1>让大模型只看<br><em>真正重要的东西。</em></h1>
-        <p class="lead">jet 是一个 coding agent：用轻量 judge 做判断，用大模型完成工作，用代码守住上下文、权限和验证边界。</p>
-        <div class="hero-actions"><a class="button primary" href="#flow">从一次请求开始</a><a class="button" href="DESIGN.md">阅读 Markdown 原文</a></div>
+        <h1 data-i18n="hero-title">Let the big model see<br><em>only what matters.</em></h1>
+        <p class="lead" data-i18n="hero-lead">jet is a coding agent where a lightweight judge makes decisions, a large model does the work, and code protects context, permissions, and verification.</p>
+        <div class="hero-actions"><a class="button primary" href="#flow" data-i18n="hero-cta">Start with one request</a><a class="button" href="DESIGN.md" data-i18n="hero-doc">Read the Markdown source</a></div>
       </div>
       <div class="hero-diagram" aria-label="judge、worker 和 code 的协作图">
         <div class="orbit"></div><div class="orbit two"></div>
-        <div class="node judge"><strong>JUDGE</strong><small>判断 / 路由 / 验证</small></div>
-        <div class="node worker"><strong>WORKER LLM</strong><small>写代码 / 回答问题</small></div>
-        <div class="node code"><strong>JET CODE</strong><small>预算 / 权限 / 状态</small></div>
+        <div class="node judge"><strong>JUDGE</strong><small data-i18n="node-judge">judgment / routing / verification</small></div>
+        <div class="node worker"><strong>WORKER LLM</strong><small data-i18n="node-worker">code / answers</small></div>
+        <div class="node code"><strong>JET CODE</strong><small data-i18n="node-code">budgets / permissions / state</small></div>
       </div>
     </section>
 
     <section class="section" id="flow"><div class="shell">
-      <div class="section-head"><div class="kicker">01 / The loop</div><h2>一次请求，发生了什么？</h2><p>它不是把聊天记录无限加长，而是每一步都从持久化状态中重新组装一个合适的工作窗口。</p></div>
+      <div class="section-head"><div class="kicker">01 / The loop</div><h2 data-i18n="flow-title">What happens in one request?</h2><p data-i18n="flow-lead">Instead of endlessly growing a transcript, jet rebuilds a right-sized working window from durable state at every step.</p></div>
       <div class="flow">
-        <article class="flow-step"><div class="number">01</div><h3>保存状态</h3><p>用户请求、工具结果、计划节点都成为 SQLite 中的 chunk。</p></article>
-        <article class="flow-step"><div class="number">02</div><h3>选择上下文</h3><p>judge 判断哪些历史需要隐藏、备注、摘要或全文。</p></article>
-        <article class="flow-step"><div class="number">03</div><h3>选择工具</h3><p>所有工具都有简介，只有本步可能用到的工具获得完整 schema。</p></article>
-        <article class="flow-step"><div class="number">04</div><h3>执行工作</h3><p>worker LLM 流式输出；策略检查后才真正执行写入或命令。</p></article>
-        <article class="flow-step"><div class="number">05</div><h3>验证结果</h3><p>把目标、答案和证据交给验证器，失败时有限重试，绝不无限循环。</p></article>
+        <article class="flow-step"><div class="number">01</div><h3 data-i18n="flow-1-title">Persist state</h3><p data-i18n="flow-1-copy">User requests, tool results, and plan nodes become SQLite chunks.</p></article>
+        <article class="flow-step"><div class="number">02</div><h3 data-i18n="flow-2-title">Choose context</h3><p data-i18n="flow-2-copy">The judge decides which history should be hidden, noted, summarized, or kept in full.</p></article>
+        <article class="flow-step"><div class="number">03</div><h3 data-i18n="flow-3-title">Choose tools</h3><p data-i18n="flow-3-copy">Every tool has a compact description; only likely tools receive full schemas.</p></article>
+        <article class="flow-step"><div class="number">04</div><h3 data-i18n="flow-4-title">Do the work</h3><p data-i18n="flow-4-copy">The worker streams output; policy checks happen before writes or commands execute.</p></article>
+        <article class="flow-step"><div class="number">05</div><h3 data-i18n="flow-5-title">Verify results</h3><p data-i18n="flow-5-copy">The goal, answer, and evidence are checked with bounded retries.</p></article>
       </div>
     </div></section>
 
     <section class="section" id="context"><div class="shell">
-      <div class="section-head"><div class="kicker">02 / RLCD</div><h2>历史不会被压扁，<br>只是暂时换一种呈现。</h2><p>普通摘要会覆盖旧信息。jet 保留原文，把“摘要”当成某一次请求的临时视图；下一步仍可以重新取回全文。</p></div>
+      <div class="section-head"><div class="kicker">02 / RLCD</div><h2 data-i18n="context-title">History is not flattened,<br>only re-presented for a moment.</h2><p data-i18n="context-lead">A normal summary can overwrite old information. jet keeps the original and treats a summary as a temporary view for one request.</p></div>
       <div class="split">
-        <div class="panel"><h3>Chunk tree</h3><p>每个事实都有自己的身份、类型、顺序和父节点。上下文是从这棵树上挑出来的。</p><div class="chunk-tree"><div class="chunk"><b>USER</b><span>修复登录测试</span><i></i></div><div class="chunk"><b>TOOL</b><span>pytest 的失败输出</span><i></i></div><div class="chunk"><b>SUBGOAL</b><span>定位 token 过期逻辑</span><i></i></div></div></div>
-        <div class="panel"><h3>四种注意力等级</h3><p>分数由 judge 提供，阈值由代码控制。预算足够时不压缩；只有真的超预算才收缩内容。</p><div class="levels"><div class="level"><strong>隐藏</strong><span>与当前目标无关，暂不放进 prompt。</span></div><div class="level"><strong>一行备注</strong><span>只需要知道它存在和结论。</span></div><div class="level"><strong>摘要</strong><span>相关，但不需要每个细节。</span></div><div class="level"><strong>全文</strong><span>关键证据、当前任务和 pinned 内容。</span></div></div></div>
+        <div class="panel"><h3 data-i18n="chunk-title">Chunk tree</h3><p data-i18n="chunk-lead">Every fact has an identity, type, order, and parent. Context is selected from this tree.</p><div class="chunk-tree"><div class="chunk"><b>USER</b><span data-i18n="chunk-1">Fix the login test</span><i></i></div><div class="chunk"><b>TOOL</b><span data-i18n="chunk-2">pytest failure output</span><i></i></div><div class="chunk"><b>SUBGOAL</b><span data-i18n="chunk-3">Locate token expiry logic</span><i></i></div></div></div>
+        <div class="panel"><h3 data-i18n="levels-title">Four attention levels</h3><p data-i18n="levels-lead">The judge supplies scores; code owns thresholds. Content is compressed only when the budget really overflows.</p><div class="levels"><div class="level"><strong data-i18n="level-1-title">Hide</strong><span data-i18n="level-1-copy">Not relevant to the current goal; leave it out for now.</span></div><div class="level"><strong data-i18n="level-2-title">One-line note</strong><span data-i18n="level-2-copy">Keep only its existence and conclusion.</span></div><div class="level"><strong data-i18n="level-3-title">Summary</strong><span data-i18n="level-3-copy">Relevant, but the full detail is unnecessary.</span></div><div class="level"><strong data-i18n="level-4-title">Full text</strong><span data-i18n="level-4-copy">Key evidence, the current task, and pinned content.</span></div></div></div>
       </div>
     </div></section>
 
     <section class="section"><div class="shell">
-      <div class="section-head"><div class="kicker">03 / Division of labor</div><h2>三种角色，三种擅长。</h2><p>把“判断”和“创造”拆开，才不会让昂贵的大模型处理每一个琐碎选择。</p></div>
-      <div class="roles"><article class="role"><code>CHEAP + FREQUENT</code><h3>Judge</h3><p>做结构化判断：相关性、工具路由、计划门控、权限建议、完成验证。</p></article><article class="role"><code>EXPENSIVE + FOCUSED</code><h3>Worker</h3><p>读取精简后的上下文，写代码、调用工具、回答用户。只把成本花在真正的工作上。</p></article><article class="role"><code>DETERMINISTIC</code><h3>Code</h3><p>拥有阈值、预算、递归深度、权限规则、重复调用拒绝和停止条件。</p></article></div>
+      <div class="section-head"><div class="kicker">03 / Division of labor</div><h2 data-i18n="roles-title">Three roles, three strengths.</h2><p data-i18n="roles-lead">Separate judgment from creation so the expensive model does not handle every tiny decision.</p></div>
+      <div class="roles"><article class="role"><code>CHEAP + FREQUENT</code><h3>Judge</h3><p data-i18n="judge-copy">Structured decisions: relevance, tool routing, plan gating, permission advice, and completion checks.</p></article><article class="role"><code>EXPENSIVE + FOCUSED</code><h3>Worker</h3><p data-i18n="worker-copy">Reads a focused context, writes code, calls tools, and answers the user. Cost is spent on real work.</p></article><article class="role"><code>DETERMINISTIC</code><h3>Code</h3><p data-i18n="code-copy">Owns thresholds, budgets, recursion depth, permission rules, duplicate-call refusal, and stop conditions.</p></article></div>
     </div></section>
 
     <section class="section" id="safety"><div class="shell">
-      <div class="section-head"><div class="kicker">04 / Safety boundary</div><h2>模型可以建议，<br>不能偷偷放行。</h2><p>对于写文件和执行命令，决策是单向收紧的。确定性规则永远先于模型意见。</p></div>
-      <div class="policy"><div class="policy-step"><strong>① 确定性规则</strong><span>拦截 sudo、危险递归删除、远程内容直接 pipe 到 shell 等明确风险。</span></div><div class="policy-step"><strong>② Judge 安全意见</strong><span>发现规则没覆盖到的潜在泄漏、破坏或越权风险时，只能把结果收紧。</span></div><div class="policy-step"><strong>③ 人工确认</strong><span>Ask 模式下交给用户确认；没有 approver 时默认拒绝，失败关闭。</span></div></div>
+      <div class="section-head"><div class="kicker">04 / Safety boundary</div><h2 data-i18n="safety-title">The model can advise,<br>but it cannot quietly approve.</h2><p data-i18n="safety-lead">For writes and commands, decisions only move toward stricter safety. Deterministic rules always come first.</p></div>
+      <div class="policy"><div class="policy-step"><strong data-i18n="policy-1-title">① Deterministic rules</strong><span data-i18n="policy-1-copy">Block clear risks such as sudo, dangerous recursive deletion, and piping remote content into a shell.</span></div><div class="policy-step"><strong data-i18n="policy-2-title">② Judge safety advice</strong><span data-i18n="policy-2-copy">Catch potential leaks, damage, or privilege escalation that rules did not anticipate; only tighten the result.</span></div><div class="policy-step"><strong data-i18n="policy-3-title">③ Human approval</strong><span data-i18n="policy-3-copy">Ask mode sends the call to a person; with no approver, the call is denied and the system fails closed.</span></div></div>
     </div></section>
 
     <section class="section"><div class="shell">
-      <div class="section-head"><div class="kicker">05 / Why it matters</div><h2>创新不在某个名词，<br>而在边界的组合。</h2><p>这些机制单独看都不陌生，真正的差异是它们被放进了同一个可观察、可限制、可恢复的循环。</p></div>
-      <table class="compare"><thead><tr><th>问题</th><th>常见做法</th><th>jet 的做法</th><th>得到什么</th></tr></thead><tbody><tr><td>上下文太长</td><td>覆盖旧摘要</td><td>保留 chunk，按步选择视图</td><td>细节可恢复</td></tr><tr><td>工具太多</td><td>发送所有 schema</td><td>简介常驻，schema 按需注入</td><td>更少噪声</td></tr><tr><td>模型不可靠</td><td>让模型自行决定</td><td>代码拥有策略和边界</td><td>失败可解释</td></tr><tr><td>答案是否完成</td><td>相信最后一句话</td><td>对照目标、答案和证据验证</td><td>少做无根据承诺</td></tr></tbody></table>
+      <div class="section-head"><div class="kicker">05 / Why it matters</div><h2 data-i18n="why-title">The innovation is not a buzzword,<br>but the combination of boundaries.</h2><p data-i18n="why-lead">Each mechanism is familiar on its own. The difference is an observable, bounded, recoverable loop that combines them.</p></div>
+      <table class="compare"><thead><tr><th data-i18n="table-1">Problem</th><th data-i18n="table-2">Common shortcut</th><th data-i18n="table-3">jet's approach</th><th data-i18n="table-4">Benefit</th></tr></thead><tbody><tr><td data-i18n="row-1-1">Context is too long</td><td data-i18n="row-1-2">Overwrite with summaries</td><td data-i18n="row-1-3">Keep chunks, choose a view per step</td><td data-i18n="row-1-4">Detail is recoverable</td></tr><tr><td data-i18n="row-2-1">Too many tools</td><td data-i18n="row-2-2">Send every schema</td><td data-i18n="row-2-3">Descriptions stay; schemas are on demand</td><td data-i18n="row-2-4">Less noise</td></tr><tr><td data-i18n="row-3-1">Model is uncertain</td><td data-i18n="row-3-2">Let the model decide freely</td><td data-i18n="row-3-3">Code owns policy and limits</td><td data-i18n="row-3-4">Explainable failure</td></tr><tr><td data-i18n="row-4-1">Is the answer complete?</td><td data-i18n="row-4-2">Trust the final sentence</td><td data-i18n="row-4-3">Verify against goal, answer, and evidence</td><td data-i18n="row-4-4">Fewer unsupported claims</td></tr></tbody></table>
     </div></section>
 
     <section class="section" id="map"><div class="shell">
-      <div class="section-head"><div class="kicker">06 / Open the hood</div><h2>想深入时，去看这些文件。</h2><p>可视化页面讲概念；下面的 Markdown 和源代码负责精确细节。</p></div>
-      <details open><summary>上下文如何选择？</summary><div><code>src/jet/context/attention.py</code> 负责打分和四级呈现；<code>src/jet/context/builder.py</code> 负责 token budget、协议安全的消息分组和最终 prompt。</div></details>
-      <details><summary>计划为什么不会拖慢简单任务？</summary><div><code>src/jet/context/decompose.py</code> 先用 judge 判断是否需要计划，并与第一步生成并发；计划还有深度、总节点数、去重和可执行性边界。</div></details>
-      <details><summary>一次工具调用如何被记录？</summary><div><code>src/jet/agent/loop.py</code> 负责执行、持久化和重复调用拒绝；<code>src/jet/policy/permissions.py</code> 负责规则、judge 意见和人工审批。</div></details>
-      <details><summary>如何知道 agent 有没有真的完成？</summary><div><code>src/jet/agent/verify.py</code> 同时支持 judge 与独立 LLM 验证；结果写入 trace，格式错误或 provider 不可用时明确标记为 inconclusive。</div></details>
+      <div class="section-head"><div class="kicker">06 / Open the hood</div><h2 data-i18n="map-title">When you want depth, open these files.</h2><p data-i18n="map-lead">This visual guide explains the ideas; the Markdown and source code keep the exact details.</p></div>
+      <details open><summary data-i18n="map-1-title">How is context selected?</summary><div data-i18n="map-1-copy"><code>src/jet/context/attention.py</code> scores and renders four levels; <code>src/jet/context/builder.py</code> handles token budgets, protocol-safe message blocks, and the final prompt.</div></details>
+      <details><summary data-i18n="map-2-title">Why does planning not slow simple tasks?</summary><div data-i18n="map-2-copy"><code>src/jet/context/decompose.py</code> asks the judge whether planning is needed and runs it alongside the first generation step. Depth, total nodes, deduplication, and actionability are bounded.</div></details>
+      <details><summary data-i18n="map-3-title">How is a tool call recorded?</summary><div data-i18n="map-3-copy"><code>src/jet/agent/loop.py</code> executes, persists, and refuses duplicate calls; <code>src/jet/policy/permissions.py</code> handles rules, judge advice, and human approval.</div></details>
+      <details><summary data-i18n="map-4-title">How do we know the agent actually finished?</summary><div data-i18n="map-4-copy"><code>src/jet/agent/verify.py</code> supports both judge and independent LLM verification; malformed or unavailable provider results are explicitly marked inconclusive.</div></details>
     </div></section>
 
-    <section class="shell closing"><div><div class="kicker">The short version</div><h2>把完整案例文件留在架子上，每次只递给模型真正需要的几页。</h2></div><div><p>这就是 jet 的核心：持久化状态 + 轻量判断 + 聚焦执行 + 证据验证。便宜的概率性建议，被确定性的代码边界包住。</p><a class="button primary" href="../README.md">回到 README</a></div></section>
+    <section class="shell closing"><div><div class="kicker" data-i18n="short-kicker">The short version</div><h2 data-i18n="short-title">Keep the full case file on the shelf; hand the model only the pages it needs.</h2></div><div><p data-i18n="short-copy">That is jet's core: durable state + lightweight judgment + focused execution + evidence-based verification. Probabilistic advice, surrounded by deterministic code boundaries.</p><a class="button primary" href="../README.md" data-i18n="back-readme">Back to README</a></div></section>
   </main>
-  <footer class="shell"><span>jet / visual design notes</span><span>Source of truth: <a href="DESIGN.md">docs/DESIGN.md</a></span></footer>
+  <footer class="shell"><span>jet / visual design notes</span><span data-i18n="source-truth">Source of truth: <a href="DESIGN.md">docs/DESIGN.md</a></span></footer>
+  <script>
+    const copy = {
+      en: {
+        credit: 'Thanks to the author of <a href="https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/edit?tab=t.0" target="_blank" rel="noreferrer">Thoughts on a TypeSafe coding agent</a>. This guide translates those ideas into jet\'s current implementation.',
+        'nav-flow': 'One request', 'nav-context': 'Context', 'nav-safety': 'Safety', 'nav-map': 'Code map',
+        'hero-title': 'Let the big model see<br><em>only what matters.</em>',
+        'hero-lead': 'jet is a coding agent where a lightweight judge makes decisions, a large model does the work, and code protects context, permissions, and verification.',
+        'hero-cta': 'Start with one request', 'hero-doc': 'Read the Markdown source',
+        'node-judge': 'judgment / routing / verification', 'node-worker': 'code / answers', 'node-code': 'budgets / permissions / state',
+        'flow-title': 'What happens in one request?', 'flow-lead': 'Instead of endlessly growing a transcript, jet rebuilds a right-sized working window from durable state at every step.',
+        'flow-1-title': 'Persist state', 'flow-1-copy': 'User requests, tool results, and plan nodes become SQLite chunks.',
+        'flow-2-title': 'Choose context', 'flow-2-copy': 'The judge decides which history should be hidden, noted, summarized, or kept in full.',
+        'flow-3-title': 'Choose tools', 'flow-3-copy': 'Every tool has a compact description; only likely tools receive full schemas.',
+        'flow-4-title': 'Do the work', 'flow-4-copy': 'The worker streams output; policy checks happen before writes or commands execute.',
+        'flow-5-title': 'Verify results', 'flow-5-copy': 'The goal, answer, and evidence are checked with bounded retries.',
+        'context-title': 'History is not flattened,<br>only re-presented for a moment.', 'context-lead': 'A normal summary can overwrite old information. jet keeps the original and treats a summary as a temporary view for one request.',
+        'chunk-title': 'Chunk tree', 'chunk-lead': 'Every fact has an identity, type, order, and parent. Context is selected from this tree.', 'chunk-1': 'Fix the login test', 'chunk-2': 'pytest failure output', 'chunk-3': 'Locate token expiry logic',
+        'levels-title': 'Four attention levels', 'levels-lead': 'The judge supplies scores; code owns thresholds. Content is compressed only when the budget really overflows.',
+        'level-1-title': 'Hide', 'level-1-copy': 'Not relevant to the current goal; leave it out for now.', 'level-2-title': 'One-line note', 'level-2-copy': 'Keep only its existence and conclusion.', 'level-3-title': 'Summary', 'level-3-copy': 'Relevant, but the full detail is unnecessary.', 'level-4-title': 'Full text', 'level-4-copy': 'Key evidence, the current task, and pinned content.',
+        'roles-title': 'Three roles, three strengths.', 'roles-lead': 'Separate judgment from creation so the expensive model does not handle every tiny decision.', 'judge-copy': 'Structured decisions: relevance, tool routing, plan gating, permission advice, and completion checks.', 'worker-copy': 'Reads a focused context, writes code, calls tools, and answers the user. Cost is spent on real work.', 'code-copy': 'Owns thresholds, budgets, recursion depth, permission rules, duplicate-call refusal, and stop conditions.',
+        'safety-title': 'The model can advise,<br>but it cannot quietly approve.', 'safety-lead': 'For writes and commands, decisions only move toward stricter safety. Deterministic rules always come first.', 'policy-1-title': '① Deterministic rules', 'policy-1-copy': 'Block clear risks such as sudo, dangerous recursive deletion, and piping remote content into a shell.', 'policy-2-title': '② Judge safety advice', 'policy-2-copy': 'Catch potential leaks, damage, or privilege escalation that rules did not anticipate; only tighten the result.', 'policy-3-title': '③ Human approval', 'policy-3-copy': 'Ask mode sends the call to a person; with no approver, the call is denied and the system fails closed.',
+        'why-title': 'The innovation is not a buzzword,<br>but the combination of boundaries.', 'why-lead': 'Each mechanism is familiar on its own. The difference is an observable, bounded, recoverable loop that combines them.', 'table-1': 'Problem', 'table-2': 'Common shortcut', 'table-3': "jet's approach", 'table-4': 'Benefit', 'row-1-1': 'Context is too long', 'row-1-2': 'Overwrite with summaries', 'row-1-3': 'Keep chunks, choose a view per step', 'row-1-4': 'Detail is recoverable', 'row-2-1': 'Too many tools', 'row-2-2': 'Send every schema', 'row-2-3': 'Descriptions stay; schemas are on demand', 'row-2-4': 'Less noise', 'row-3-1': 'Model is uncertain', 'row-3-2': 'Let the model decide freely', 'row-3-3': 'Code owns policy and limits', 'row-3-4': 'Explainable failure', 'row-4-1': 'Is the answer complete?', 'row-4-2': 'Trust the final sentence', 'row-4-3': 'Verify against goal, answer, and evidence', 'row-4-4': 'Fewer unsupported claims',
+        'map-title': 'When you want depth, open these files.', 'map-lead': 'This visual guide explains the ideas; the Markdown and source code keep the exact details.', 'map-1-title': 'How is context selected?', 'map-1-copy': '<code>src/jet/context/attention.py</code> scores and renders four levels; <code>src/jet/context/builder.py</code> handles token budgets, protocol-safe message blocks, and the final prompt.', 'map-2-title': 'Why does planning not slow simple tasks?', 'map-2-copy': '<code>src/jet/context/decompose.py</code> asks the judge whether planning is needed and runs it alongside the first generation step. Depth, total nodes, deduplication, and actionability are bounded.', 'map-3-title': 'How is a tool call recorded?', 'map-3-copy': '<code>src/jet/agent/loop.py</code> executes, persists, and refuses duplicate calls; <code>src/jet/policy/permissions.py</code> handles rules, judge advice, and human approval.', 'map-4-title': 'How do we know the agent actually finished?', 'map-4-copy': '<code>src/jet/agent/verify.py</code> supports both judge and independent LLM verification; malformed or unavailable provider results are explicitly marked inconclusive.', 'short-kicker': 'The short version', 'short-title': 'Keep the full case file on the shelf; hand the model only the pages it needs.', 'short-copy': "That is jet's core: durable state + lightweight judgment + focused execution + evidence-based verification. Probabilistic advice, surrounded by deterministic code boundaries.", 'back-readme': 'Back to README', 'source-truth': 'Source of truth: <a href="DESIGN.md">docs/DESIGN.md</a>'
+      },
+      zh: {
+        credit: '感谢作者提供的思路：<a href="https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/edit?tab=t.0" target="_blank" rel="noreferrer">Thoughts on a TypeSafe coding agent</a>。本文把这些想法转译成 jet 当前实现的通俗说明。',
+        'nav-flow': '一次请求', 'nav-context': '上下文', 'nav-safety': '安全边界', 'nav-map': '代码地图', 'hero-title': '让大模型只看<br><em>真正重要的东西。</em>', 'hero-lead': 'jet 是一个 coding agent：用轻量 judge 做判断，用大模型完成工作，用代码守住上下文、权限和验证边界。', 'hero-cta': '从一次请求开始', 'hero-doc': '阅读 Markdown 原文', 'node-judge': '判断 / 路由 / 验证', 'node-worker': '写代码 / 回答问题', 'node-code': '预算 / 权限 / 状态', 'flow-title': '一次请求，发生了什么？', 'flow-lead': '它不是把聊天记录无限加长，而是每一步都从持久化状态中重新组装一个合适的工作窗口。', 'flow-1-title': '保存状态', 'flow-1-copy': '用户请求、工具结果、计划节点都成为 SQLite 中的 chunk。', 'flow-2-title': '选择上下文', 'flow-2-copy': 'judge 判断哪些历史需要隐藏、备注、摘要或全文。', 'flow-3-title': '选择工具', 'flow-3-copy': '所有工具都有简介，只有本步可能用到的工具获得完整 schema。', 'flow-4-title': '执行工作', 'flow-4-copy': 'worker LLM 流式输出；策略检查后才真正执行写入或命令。', 'flow-5-title': '验证结果', 'flow-5-copy': '把目标、答案和证据交给验证器，失败时有限重试，绝不无限循环。', 'context-title': '历史不会被压扁，<br>只是暂时换一种呈现。', 'context-lead': '普通摘要会覆盖旧信息。jet 保留原文，把摘要当成某一次请求的临时视图；下一步仍可以重新取回全文。', 'chunk-title': 'Chunk tree', 'chunk-lead': '每个事实都有自己的身份、类型、顺序和父节点。上下文是从这棵树上挑出来的。', 'chunk-1': '修复登录测试', 'chunk-2': 'pytest 的失败输出', 'chunk-3': '定位 token 过期逻辑', 'levels-title': '四种注意力等级', 'levels-lead': '分数由 judge 提供，阈值由代码控制。预算足够时不压缩；只有真的超预算才收缩内容。', 'level-1-title': '隐藏', 'level-1-copy': '与当前目标无关，暂不放进 prompt。', 'level-2-title': '一行备注', 'level-2-copy': '只需要知道它存在和结论。', 'level-3-title': '摘要', 'level-3-copy': '相关，但不需要每个细节。', 'level-4-title': '全文', 'level-4-copy': '关键证据、当前任务和 pinned 内容。', 'roles-title': '三种角色，三种擅长。', 'roles-lead': '把判断和创造拆开，才不会让昂贵的大模型处理每一个琐碎选择。', 'judge-copy': '做结构化判断：相关性、工具路由、计划门控、权限建议、完成验证。', 'worker-copy': '读取精简后的上下文，写代码、调用工具、回答用户。只把成本花在真正的工作上。', 'code-copy': '拥有阈值、预算、递归深度、权限规则、重复调用拒绝和停止条件。', 'safety-title': '模型可以建议，<br>不能偷偷放行。', 'safety-lead': '对于写文件和执行命令，决策是单向收紧的。确定性规则永远先于模型意见。', 'policy-1-title': '① 确定性规则', 'policy-1-copy': '拦截 sudo、危险递归删除、远程内容直接 pipe 到 shell 等明确风险。', 'policy-2-title': '② Judge 安全意见', 'policy-2-copy': '发现规则没覆盖到的潜在泄漏、破坏或越权风险时，只能把结果收紧。', 'policy-3-title': '③ 人工确认', 'policy-3-copy': 'Ask 模式下交给用户确认；没有 approver 时默认拒绝，失败关闭。', 'why-title': '创新不在某个名词，<br>而在边界的组合。', 'why-lead': '这些机制单独看都不陌生，真正的差异是它们被放进了同一个可观察、可限制、可恢复的循环。', 'table-1': '问题', 'table-2': '常见做法', 'table-3': 'jet 的做法', 'table-4': '得到什么', 'row-1-1': '上下文太长', 'row-1-2': '覆盖旧摘要', 'row-1-3': '保留 chunk，按步选择视图', 'row-1-4': '细节可恢复', 'row-2-1': '工具太多', 'row-2-2': '发送所有 schema', 'row-2-3': '简介常驻，schema 按需注入', 'row-2-4': '更少噪声', 'row-3-1': '模型不可靠', 'row-3-2': '让模型自行决定', 'row-3-3': '代码拥有策略和边界', 'row-3-4': '失败可解释', 'row-4-1': '答案是否完成', 'row-4-2': '相信最后一句话', 'row-4-3': '对照目标、答案和证据验证', 'row-4-4': '少做无根据承诺', 'map-title': '想深入时，去看这些文件。', 'map-lead': '可视化页面讲概念；下面的 Markdown 和源代码负责精确细节。', 'map-1-title': '上下文如何选择？', 'map-1-copy': '<code>src/jet/context/attention.py</code> 负责打分和四级呈现；<code>src/jet/context/builder.py</code> 负责 token budget、协议安全的消息分组和最终 prompt。', 'map-2-title': '计划为什么不会拖慢简单任务？', 'map-2-copy': '<code>src/jet/context/decompose.py</code> 先用 judge 判断是否需要计划，并与第一步生成并发；计划还有深度、总节点数、去重和可执行性边界。', 'map-3-title': '一次工具调用如何被记录？', 'map-3-copy': '<code>src/jet/agent/loop.py</code> 负责执行、持久化和重复调用拒绝；<code>src/jet/policy/permissions.py</code> 负责规则、judge 意见和人工审批。', 'map-4-title': '如何知道 agent 有没有真的完成？', 'map-4-copy': '<code>src/jet/agent/verify.py</code> 同时支持 judge 与独立 LLM 验证；结果写入 trace，格式错误或 provider 不可用时明确标记为 inconclusive。', 'short-kicker': '简短总结', 'short-title': '把完整案例文件留在架子上，每次只递给模型真正需要的几页。', 'short-copy': '这就是 jet 的核心：持久化状态 + 轻量判断 + 聚焦执行 + 证据验证。便宜的概率性建议，被确定性的代码边界包住。', 'back-readme': '回到 README', 'source-truth': '事实来源：<a href="DESIGN.md">docs/DESIGN.md</a>'
+      }
+    };
+    const tabs = document.querySelectorAll('.lang-tab');
+    function setLanguage(language) {
+      document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';
+      document.querySelectorAll('[data-i18n]').forEach((node) => {
+        const value = copy[language][node.dataset.i18n];
+        if (value !== undefined) node.innerHTML = value;
+      });
+      tabs.forEach((tab) => tab.setAttribute('aria-selected', String(tab.dataset.lang === language)));
+      localStorage.setItem('jet-design-language', language);
+    }
+    tabs.forEach((tab) => tab.addEventListener('click', () => setLanguage(tab.dataset.lang)));
+    setLanguage(localStorage.getItem('jet-design-language') || 'en');
+  </script>
 </body>
 </html>
