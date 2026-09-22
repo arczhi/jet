@@ -58,6 +58,16 @@ class Verifier:
             return await self._llm(goal, answer, evidence)
         judge_result = await self._judge(goal, answer, evidence)
         llm_result = await self._llm(goal, answer, evidence)
+        if not llm_result.conclusive:
+            # An inconclusive cross-check must not fail the turn and force a retry
+            # loop; the judgment verdict stands, with the degradation recorded.
+            return Verification(
+                satisfied=judge_result.satisfied,
+                confidence=judge_result.confidence,
+                reason=f"llm verifier inconclusive ({llm_result.reason}); judgment verdict used",
+                verifier="judge+llm",
+                conclusive=False,
+            )
         satisfied = judge_result.satisfied and llm_result.satisfied
         reason = (
             f"judge: {judge_result.reason} | llm: {llm_result.reason}"
@@ -113,18 +123,19 @@ class Verifier:
                 confidence=0.0,
                 reason=f"verifier provider failed: {exc}",
                 verifier="llm",
+                conclusive=False,
             )
         if not response.text.strip() and response.reasoning.strip():
             # A reasoning model spent its whole budget thinking and never answered;
-            # surface that explicitly instead of reading it as a malformed verdict.
+            # mark the verdict inconclusive so it never triggers a retry loop.
             if self.trace is not None:
                 self.trace.event("verification.llm.reasoning_only", reasoning_chars=len(response.reasoning))
             return Verification(
                 satisfied=False,
                 confidence=0.0,
-                reason="verifier produced reasoning but no verdict before its token budget "
-                "(treated as not satisfied)",
+                reason="verifier produced reasoning but no verdict before its token budget",
                 verifier="llm",
+                conclusive=False,
             )
         try:
             parsed = json.loads(_extract_object(response.text))
@@ -137,8 +148,9 @@ class Verifier:
             return Verification(
                 satisfied=False,
                 confidence=0.0,
-                reason=f"verifier returned malformed output ({exc}); treated as not satisfied",
+                reason=f"verifier returned malformed output ({exc})",
                 verifier="llm",
+                conclusive=False,
             )
         if self.trace is not None:
             self.trace.event(

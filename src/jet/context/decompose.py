@@ -65,6 +65,16 @@ ACTIONABLE_CRITERIA = {
     "false": "It bundles several steps and needs a further breakdown.",
 }
 
+NEEDS_PLAN_INSTRUCTION = (
+    "Does `goal` need to be broken into multiple subtasks before a coding agent can act on it? "
+    "Answer no if the goal is a single action (one search, read, edit, run, or question), "
+    "even if that action needs tool calls."
+)
+NEEDS_PLAN_CRITERIA = {
+    "true": "Multi-part work that needs sequencing before anything can be executed.",
+    "false": "A single action the agent can take immediately.",
+}
+
 
 class Decomposer:
     def __init__(
@@ -76,6 +86,7 @@ class Decomposer:
         trace: Trace | None = None,
         max_depth: int = 2,
         max_total_subgoals: int = 16,
+        gating: bool = True,
     ):
         self.llm = llm
         self.judge = judge
@@ -83,6 +94,7 @@ class Decomposer:
         self.trace = trace
         self.max_depth = max_depth
         self.max_total_subgoals = max_total_subgoals
+        self.gating = gating
 
     async def decompose(
         self,
@@ -93,6 +105,12 @@ class Decomposer:
         known: Sequence[SubGoal] | None = None,
     ) -> list[SubGoal]:
         if depth > self.max_depth:
+            return []
+        if depth == 0 and self.gating and await self._plan_not_needed(goal):
+            # A fast judgment call replaces an expensive LLM planning round trip
+            # for goals that are single actions anyway.
+            if self.trace is not None:
+                self.trace.event("decompose.skipped", goal=goal)
             return []
         context = self._context_note(parent_id)
         proposed = await self._propose(goal, context=context, known=known or [])
@@ -117,6 +135,15 @@ class Decomposer:
                     subgoal.status = GoalStatus.SKIPPED
                     self.store.update_status(subgoal.chunk_id, GoalStatus.SKIPPED)
         return created
+
+    async def _plan_not_needed(self, goal: str) -> bool:
+        probability = await self.judge.noul(
+            {"goal": goal},
+            NEEDS_PLAN_INSTRUCTION,
+            criteria=NEEDS_PLAN_CRITERIA,
+            purpose="plan_gating",
+        )
+        return probability < 0.5
 
     async def _propose(self, goal: str, *, context: str, known: Sequence[SubGoal]) -> list[str]:
         payload = {

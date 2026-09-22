@@ -3,38 +3,36 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="dark" />
+  <meta name="color-scheme" content="light" />
   <title>jet</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d0f13'/%3E%3Cpath d='M9 8l7 8-7 8' stroke='%235a9cf8' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M16 24h7' stroke='%235a9cf8' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%235ab5f5'/%3E%3Cstop offset='1' stop-color='%232e86cf'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M25.6 6.4 6.4 17.2l6.8 1.2 1.2 6.8z' fill='%23fff'/%3E%3Cpath d='M15.6 17.2l10-10.8' stroke='%23bfe0f7' stroke-width='1.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="mark" aria-hidden="true">›_</span>
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M25.6 6.4 6.4 17.2l6.8 1.2 1.2 6.8z" fill="#fff"/><path d="M15.6 17.2l10-10.8" stroke="#bfe0f7" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>
+      </span>
       <span class="wordmark">jet</span>
       <span class="session" id="session-id" title="">—</span>
-      <span class="conn" id="conn" title="service connection"><span class="conn-dot"></span></span>
+      <span class="conn" id="conn" title="connected"><span class="conn-dot"></span></span>
+      <span class="working" id="working" hidden>step <b id="step-num">1</b></span>
     </div>
     <div class="models" id="models">—</div>
-    <div class="topbar-actions">
-      <div class="segmented" id="approval-mode" role="group" aria-label="Approval mode">
-        <button data-mode="ask" class="active">Ask</button>
-        <button data-mode="auto">Auto</button>
-        <button data-mode="deny">Deny</button>
-      </div>
-      <button class="ghost" id="new-session" title="Start a new session">New session</button>
-    </div>
+    <button class="ghost small" id="new-session" title="Start a new session">New</button>
   </header>
 
   <main>
     <section class="transcript-pane">
       <div class="transcript" id="transcript">
         <div class="empty" id="empty">
-          <div class="empty-mark">›_</div>
+          <div class="empty-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32"><path d="M25.6 6.4 6.4 17.2l6.8 1.2 1.2 6.8z" fill="#fff"/><path d="M15.6 17.2l10-10.8" stroke="#bfe0f7" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>
+          </div>
           <h1>jet</h1>
           <p class="empty-lede">A fast coding agent for this workspace. It plans, acts in
-             small verified steps, and shows you exactly what context it chose to see.</p>
+             small verified steps, and shows you exactly the context it chose to see.</p>
           <div class="starters">
             <button class="starter" data-task="Explain the architecture of src/jet/ in a few paragraphs.">Explain the architecture of src/jet/</button>
             <button class="starter" data-task="Find every TODO and FIXME in this codebase and summarize them by theme.">Summarize all TODOs by theme</button>
@@ -63,7 +61,7 @@
         <button data-tab="session">Session</button>
       </nav>
       <div class="tab-panel active" id="panel-plan">
-        <p class="muted" id="plan-empty">No plan yet. jet decomposes the task on the first turn.</p>
+        <p class="muted" id="plan-empty">No plan yet. Simple tasks run directly; multi-step ones are decomposed.</p>
         <ul class="plan" id="plan"></ul>
       </div>
       <div class="tab-panel" id="panel-context">
@@ -83,14 +81,17 @@
           <dt>chunks</dt><dd id="s-chunks">—</dd>
           <dt>tokens</dt><dd id="s-usage">—</dd>
           <dt>cost</dt><dd id="s-cost">—</dd>
-          <dt>session</dt><dd id="s-session" class="mono">—</dd>
-          <dt>trace</dt><dd id="s-trace" class="mono path">—</dd>
         </dl>
+        <div class="approval-row">
+          <span class="row-label">approvals</span>
+          <div class="segmented mini" id="approval-mode" role="group" aria-label="Approval mode">
+            <button data-mode="ask" class="active">Ask</button>
+            <button data-mode="auto">Auto</button>
+            <button data-mode="deny">Deny</button>
+          </div>
+        </div>
         <h3 class="section-title">Recent chunks</h3>
         <ul class="recent" id="s-recent"></ul>
-        <div class="sidebar-actions">
-          <button class="ghost" id="refresh-state">Refresh</button>
-        </div>
       </div>
     </aside>
   </main>

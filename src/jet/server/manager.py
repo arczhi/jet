@@ -116,6 +116,7 @@ class TurnManager:
                         "cost_usd": 0.0,
                     }
                 )
+                self._trace_payload("turn.failed", error=f"{type(exc).__name__}: {exc}")
             finally:
                 self._finalize(record, canceled=record.cancel_requested)
 
@@ -138,9 +139,16 @@ class TurnManager:
             return
         if canceled:
             self._push({"type": "turn_canceled", "reason": "canceled by client"})
+            self._trace_payload("turn.canceled")
         record.finished = True
         for queue in list(record.queues):
             queue.put_nowait(None)
+
+    def _trace_payload(self, kind: str, **fields: Any) -> None:
+        """Client-only events (cancellations, crashes) must still be traceable."""
+        agent = self._agent
+        if agent is not None:
+            agent.trace.event(kind, **fields)
 
     async def subscribe(self, record: TurnRecord) -> AsyncIterator[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()

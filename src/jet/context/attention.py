@@ -76,10 +76,9 @@ class MetaAttention:
     async def rank(self, *, task: str, chunks: Sequence[Chunk]) -> AttentionResult:
         """Score every candidate chunk and resolve each to a level with rendered text."""
         scorable = [c for c in chunks if c.kind not in NON_SCORABLE_KINDS]
-        if scorable:
-            scores = await self._score(task, scorable)
-        else:
-            scores = {}
+        scores = await self._score(task, scorable) if scorable else {}
+
+        resolved: list[tuple[Chunk, AttentionLevel, float]] = []
         views: list[AttentionView] = []
         hidden: list[Chunk] = []
         for chunk in chunks:
@@ -99,13 +98,33 @@ class MetaAttention:
             if level is AttentionLevel.HIDE:
                 hidden.append(chunk)
                 continue
+            resolved.append((chunk, level, score))
+
+        # Compress everything that needs shrinking, one batched call per level.
+        rendered_by_id: dict[str, str] = {}
+        by_level: dict[AttentionLevel, dict[str, str]] = {}
+        for chunk, level, _ in resolved:
+            if level is not AttentionLevel.FULL:
+                by_level.setdefault(level, {})[chunk.id] = chunk.content
+        if self.summarizer is not None:
+            for level, items in by_level.items():
+                target = self.long_tokens if level is AttentionLevel.LONG else self.short_tokens
+                rendered_by_id.update(
+                    await self.summarizer.summarize_many(items, target_tokens=target, style="long")
+                )
+        for chunk, level, score in resolved:
+            if level is AttentionLevel.FULL:
+                rendered = chunk.content
+            elif chunk.id in rendered_by_id:
+                rendered = rendered_by_id[chunk.id]
+            else:
+                from jet.core.text import truncate_to_tokens
+
+                target = self.long_tokens if level is AttentionLevel.LONG else self.short_tokens
+                rendered = truncate_to_tokens(chunk.content, target)
             views.append(
                 AttentionView(
-                    chunk=chunk,
-                    level=level,
-                    score=score,
-                    rendered=await self._render(chunk, level),
-                    reason=f"score={score:.2f}",
+                    chunk=chunk, level=level, score=score, rendered=rendered, reason=f"score={score:.2f}"
                 )
             )
         return AttentionResult(views=views, hidden=hidden, scores=scores)
@@ -141,18 +160,6 @@ class MetaAttention:
                 )
             )
         return scores
-
-    async def _render(self, chunk: Chunk, level: AttentionLevel) -> str:
-        if level is AttentionLevel.FULL:
-            return chunk.content
-        if self.summarizer is None:
-            from jet.core.text import truncate_to_tokens
-
-            target = self.long_tokens if level is AttentionLevel.LONG else self.short_tokens
-            return truncate_to_tokens(chunk.content, target)
-        style = "long" if level is AttentionLevel.LONG else "short"
-        target = self.long_tokens if level is AttentionLevel.LONG else self.short_tokens
-        return await self.summarizer.summarize(chunk.content, target_tokens=target, style=style)
 
 
 def _clip(text: str, limit: int) -> str:

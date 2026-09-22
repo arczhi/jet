@@ -12,7 +12,7 @@ import socket
 import threading
 import time
 import webbrowser
-from typing import cast
+from typing import Any, cast
 
 import uvicorn
 
@@ -89,6 +89,21 @@ class DesktopServer:
         self._thread.join(timeout=10)
 
 
+def _apply_light_titlebar(native_window: Any) -> None:
+    """Force the light macOS appearance so the titlebar matches the light client.
+
+    pywebview paints the titlebar with ``NSColor.windowBackgroundColor()``, which
+    follows the window's effective appearance — dark when the system is dark.
+    The client UI is light, so the window opts out of system dark mode here,
+    before it is shown, on the main thread (``before_show`` fires there).
+    """
+    import AppKit  # type: ignore[import-untyped]
+
+    appearance = AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameAqua)
+    if appearance is not None:
+        native_window.setAppearance_(appearance)
+
+
 def run_desktop(settings: Settings, *, port: int = 8765, open_browser: bool = False) -> int:
     server = DesktopServer(settings, port=port)
     server.start()
@@ -101,13 +116,16 @@ def run_desktop(settings: Settings, *, port: int = 8765, open_browser: bool = Fa
                 print(f"jet: opening {server.url} in your browser instead")
                 open_browser = True
             else:
-                webview.create_window(
+                window = webview.create_window(
                     "jet",
                     server.url,
                     width=1280,
                     height=860,
                     min_size=(980, 640),
+                    background_color="#f3f8fd",
                 )
+                assert window is not None
+                window.events.before_show += lambda: _apply_light_titlebar(window.native)
                 webview.start()
                 return 0
         print(f"jet: serving at {server.url} (Ctrl+C to stop)")

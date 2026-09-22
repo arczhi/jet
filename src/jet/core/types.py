@@ -241,6 +241,7 @@ class Verification:
     confidence: float
     reason: str
     verifier: str
+    conclusive: bool = True
 
 
 @dataclass

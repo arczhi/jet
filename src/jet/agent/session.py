@@ -101,7 +101,9 @@ def create_agent(
         )
         if candidate.model != resolved_llm.model:
             verifier_llm = candidate
-    resolved_summarizer = summarizer or LLMSummarizer(resolved_llm)
+    # Summaries sit on the hot path of context assembly: use the fast verifier
+    # endpoint, never the reasoning generator.
+    resolved_summarizer = summarizer or LLMSummarizer(verifier_llm or resolved_llm, trace=trace)
     attention = MetaAttention(
         resolved_judge,
         batch_size=settings.attention_batch_size,

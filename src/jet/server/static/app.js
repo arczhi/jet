@@ -11,6 +11,7 @@ const state = {
   planItems: new Map(),
   approvalId: null,
   pinnedToBottom: true,
+  startedAt: null,
   usage: { input_tokens: 0, output_tokens: 0 },
   cost: 0,
 };
@@ -135,6 +136,7 @@ function addNotice(text, level) {
 
 function addTurnSummary(event) {
   const total = event.usage.input_tokens + event.usage.output_tokens;
+  const elapsed = state.startedAt ? (performance.now() - state.startedAt) / 1000 : null;
   const bar = el("div", "turn-summary");
   const cell = (label, value, cls) => {
     const c = el("span", "cell " + (cls || ""));
@@ -146,6 +148,7 @@ function addTurnSummary(event) {
   cell("steps", String(event.steps));
   cell("tools", String(event.tool_calls));
   cell("tokens", total.toLocaleString());
+  if (elapsed !== null) cell(elapsed.toFixed(1) + "s", "", "");
   if (event.cost_usd) cell("$" + event.cost_usd.toFixed(4), "", "cost");
   transcript().appendChild(bar);
   scrollToEnd();
@@ -159,16 +162,13 @@ function setModels(payload) {
   $("models").textContent = `gen ${payload.llm_model}${verify} · judge ${payload.judge}`;
   $("session-id").textContent = payload.session_id || "—";
   $("session-id").title = payload.session_id || "";
-  $("s-session").textContent = payload.session_id || "—";
   $("s-gen").textContent = `${payload.llm_profile} · ${payload.llm_model}`;
   $("s-ver").textContent = `${payload.verifier_profile || payload.llm_profile} · ${payload.verifier_model}`;
   $("s-judge").textContent = payload.judge;
   $("s-workspace").textContent = payload.workspace;
   $("s-chunks").textContent = String(payload.chunks ?? "—");
-  state.usage = payload.usage || { input_tokens: 0, output_tokens: 0 };
-  $("s-usage").textContent = `${state.usage.input_tokens.toLocaleString()} in / ${state.usage.output_tokens.toLocaleString()} out`;
-  $("s-cost").textContent = state.cost ? `$${state.cost.toFixed(4)}` : "$0";
-  $("s-trace").textContent = payload.trace_path || "—";
+  $("s-usage").textContent = `${(payload.usage?.input_tokens ?? 0).toLocaleString()} in / ${(payload.usage?.output_tokens ?? 0).toLocaleString()} out`;
+  $("s-cost").textContent = `$${(payload.cost_usd ?? 0).toFixed(4)}`;
   setApprovalMode(payload.approval_mode);
   setConnState(state.running ? "busy" : "on");
 }
@@ -190,6 +190,7 @@ function setRunning(running) {
   state.running = running;
   $("send").disabled = running;
   $("stop").hidden = !running;
+  $("working").hidden = !running;
   $("input").placeholder = running
     ? "jet is working… (⌘. to stop)"
     : "Ask jet to do something in this workspace…";
@@ -242,8 +243,7 @@ function renderContext(event) {
     row.appendChild(el("td", "level-" + view.level, view.level));
     row.appendChild(el("td", null, view.kind));
     row.appendChild(el("td", null, view.source || "—"));
-    const tokens = el("td", "num", String(view.tokens));
-    row.appendChild(tokens);
+    row.appendChild(el("td", "num", String(view.tokens)));
     tbody.appendChild(row);
   }
   switchToTab("context");
@@ -258,7 +258,7 @@ function switchToTab(name) {
 function renderRecent(chunks) {
   const list = $("s-recent");
   list.innerHTML = "";
-  for (const chunk of chunks.slice(-14).reverse()) {
+  for (const chunk of chunks.slice(-12).reverse()) {
     const li = el("li");
     li.appendChild(el("span", "k", chunk.kind.replace(/_/g, " ")));
     li.appendChild(el("span", "src", chunk.source || firstLine(chunk.content)));
@@ -268,7 +268,7 @@ function renderRecent(chunks) {
 
 function firstLine(text) {
   const line = (text || "").split("\n")[0].trim();
-  return line.length > 44 ? line.slice(0, 43) + "…" : line;
+  return line.length > 40 ? line.slice(0, 43) + "…" : line;
 }
 
 /* ---------- data ---------- */
@@ -307,13 +307,15 @@ function handleEvent(event) {
   switch (event.type) {
     case "stream_open":
     case "heartbeat":
-    case "step_started":
       return;
     case "turn_started":
       state.lastSeq = -1;
       clearEmpty();
       addUserMessage(event.task);
-      startAssistantMessage();
+      return;
+    case "step_started":
+      $("step-num").textContent = String(event.step);
+      $("working").hidden = false;
       return;
     case "plan_ready":
       renderPlan(event.subgoals.map((text) => ({ text, status: "pending" })));
@@ -374,10 +376,10 @@ function handleEvent(event) {
 
 function finishTurn(event) {
   if (event) {
-    state.usage = event.usage || state.usage;
     state.cost = event.cost_usd || 0;
   }
   setRunning(false);
+  $("working").hidden = true;
   state.turnId = null;
   if (state.eventSource) {
     state.eventSource.close();
@@ -396,9 +398,11 @@ async function sendTask() {
   input.value = "";
   input.style.height = "auto";
   setRunning(true);
+  state.startedAt = performance.now();
   state.lastSeq = -1;
   state.assistantBody = null;
   state.pinnedToBottom = true;
+  startAssistantMessage();
   let response;
   try {
     response = await fetch("/api/turns", {
@@ -477,7 +481,6 @@ async function newSession() {
   transcript().innerHTML = "";
   buildEmptyState();
   state.assistantBody = null;
-  state.usage = { input_tokens: 0, output_tokens: 0 };
   state.cost = 0;
   $("views").querySelector("tbody").innerHTML = "";
   $("context-stats").textContent = "";
@@ -487,10 +490,15 @@ async function newSession() {
   await refreshChunks();
 }
 
+const LOGO_SVG =
+  '<svg viewBox="0 0 32 32"><path d="M25.6 6.4 6.4 17.2l6.8 1.2 1.2 6.8z" fill="#fff"/><path d="M15.6 17.2l10-10.8" stroke="#bfe0f7" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>';
+
 function buildEmptyState() {
   const empty = el("div", "empty");
   empty.id = "empty";
-  empty.appendChild(el("div", "empty-mark", "›_"));
+  const mark = el("div", "empty-mark");
+  mark.innerHTML = LOGO_SVG;
+  empty.appendChild(mark);
   empty.appendChild(el("h1", null, "jet"));
   empty.appendChild(
     el("p", "empty-lede", "New session. Prior state stays on disk but out of context.")
@@ -505,7 +513,6 @@ function wire() {
   $("send").addEventListener("click", sendTask);
   $("stop").addEventListener("click", stopTurn);
   $("new-session").addEventListener("click", newSession);
-  $("refresh-state").addEventListener("click", refreshState);
   $("approval-allow").addEventListener("click", () => decideApproval(true));
   $("approval-deny").addEventListener("click", () => decideApproval(false));
   $("jump").addEventListener("click", () => {
@@ -568,9 +575,10 @@ function wire() {
 
   for (const starter of document.querySelectorAll(".starter")) {
     starter.addEventListener("click", () => {
+      if (state.running) return;
       $("input").value = starter.dataset.task;
-      $("input").focus();
       $("input").dispatchEvent(new Event("input"));
+      sendTask();
     });
   }
 

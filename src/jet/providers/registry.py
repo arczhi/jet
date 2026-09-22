@@ -29,11 +29,48 @@ def resolve_headers(template: Mapping[str, str], session_id: str | None) -> dict
     return resolved
 
 
+GATE_MARK = "broken into multiple subtasks"
+
+
+def _mock_judgment_provider() -> MockJudgmentProvider:
+    """Offline/demo double that answers by question kind.
+
+    Verification and permission checks pass; plan gating prefers direct action
+    so a demo turn does not pay for an LLM planning round trip.
+    """
+    from jet.providers.questions import (
+        Answer,
+        ChoiceAnswer,
+        NoulAnswer,
+        Question,
+        ScoreAnswer,
+    )
+
+    def handler(state: object, questions: Mapping[str, Question]) -> Mapping[str, Answer]:
+        resolved: dict[str, Answer] = {}
+        for key, question in questions.items():
+            if question.type == "noul":
+                instructions = str(question.instructions)
+                plan_needed = "broken into multiple subtasks" in instructions
+                resolved[key] = NoulAnswer(noul=0.2 if plan_needed else 0.9)
+            elif question.type == "score":
+                resolved[key] = ScoreAnswer(score=2.0)
+            else:
+                options = list(question.criteria)
+                resolved[key] = ChoiceAnswer(
+                    choice=options[0],
+                    probabilities={option: 1.0 / len(options) for option in options},
+                    confidence=0.5,
+                )
+        return resolved
+
+    return MockJudgmentProvider(handler=handler)
+
+
 def build_judgment_provider(settings: Settings, session_id: str | None = None) -> JudgmentProvider:
     headers = resolve_headers(settings.judge_extra_headers, session_id)
     if settings.judge_provider == "mock":
-        # Offline demo mode: permissive judgments so a mock session can complete.
-        return MockJudgmentProvider(default_noul=0.8, default_score=2.0)
+        return _mock_judgment_provider()
     if settings.judge_provider == "typesafe":
         if not settings.typesafe_api_key:
             raise ConfigError(
