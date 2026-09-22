@@ -14,6 +14,7 @@ loop continues until the step budget runs out.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
@@ -44,6 +45,7 @@ from jet.core.events import (
     StepStarted,
     ToolFinished,
     ToolProposed,
+    ToolWriting,
     TurnFinished,
     TurnStarted,
     Verified,
@@ -60,6 +62,7 @@ from jet.core.types import (
     SubGoal,
     TextDelta,
     ToolCall,
+    ToolCallProgress,
     ToolOutcome,
     ToolSpec,
     TurnResult,
@@ -120,6 +123,8 @@ class Agent:
         self.memory = memory
         self.emit = emit or (lambda event: None)
         self.approve = approve
+        self._inside_tool_sequence = False
+        self._note_queue: list[Message] = []
         self.tool_context = tool_context or ToolContext(
             workspace=settings.workspace,
             store=state.store,
@@ -153,17 +158,38 @@ class Agent:
             self.emit(Notice(level="info", text=f"loaded memory: {', '.join(loaded)}"))
         self.state.turn_messages = [Message.user(task)]
 
-        subgoals = await self._plan(task)
+        # Decomposition never blocks the first generation call: the gate runs
+        # concurrently with step 1, so a trivial message pays zero planning
+        # latency; a real plan lands before it can matter (step 2).
+        plan_task: asyncio.Task[list[SubGoal]] | None = asyncio.create_task(self._plan(task))
         usage = Usage()
         final_text = ""
         verification: Verification | None = None
         stopped: StopReason = "max_steps"
         tool_count = 0
+        seen_calls: set[tuple[str, str]] = set()
         steps = 0
+        subgoals: list[SubGoal] = []
 
+        verification_failures = 0
         while steps < self.settings.max_steps:
             steps += 1
             self.emit(StepStarted(step=steps))
+            if steps >= 2 and plan_task is not None and plan_task.done():
+                # The plan must never block the loop: adopt it when it has
+                # landed; otherwise proceed on the raw task and let the plan
+                # surface whenever it is ready (the Plan pane updates late but
+                # honestly). Waiting here froze simple tasks for seconds.
+                subgoals = plan_task.result()
+                plan_task = None
+            if steps == self.settings.conclude_after_steps:
+                self._add_note(
+                    f"Step budget check: {steps} of {self.settings.max_steps} steps used. "
+                    "Conclude now with your best current answer — a final text reply, no "
+                    "further tool calls. Do not invent additional verification; state "
+                    "what you completed and any limitation.",
+                    meta={"kind": "conclude_pressure"},
+                )
             current_goal = self._current_goal(task, subgoals)
             # Memory carries pre-turn state plus anything accumulated outside the
             # conversation (memory files, subgoals); this turn's own messages stay
@@ -188,6 +214,8 @@ class Agent:
                     tokens=plan.tokens,
                     hidden_chunks=len(plan.hidden),
                     dropped_verbatim=plan.counts.get("dropped_verbatim", 0),
+                    verbatim_messages=plan.verbatim_messages,
+                    verbatim_tokens=plan.verbatim_tokens,
                     views=render_view_table(plan.views),
                 )
             )
@@ -210,14 +238,33 @@ class Agent:
             self._persist_assistant(response)
 
             if not response.tool_calls:
+                # Conversational answers verify with the fast judge only — no
+                # LLM cross-check wait — and keep the retry gate intact.
                 final_text = response.text
                 verification = await self.verifier.verify(
-                    goal=task, answer=final_text, evidence=self._evidence()
+                    goal=task, answer=final_text, evidence=self._evidence(), mode="judge"
                 )
                 self.emit(Verified(verification=verification))
-                if verification.satisfied:
+                if verification.satisfied or not verification.conclusive:
+                    # Inconclusive (e.g. judge outage) must not spin a retry
+                    # loop: the answer stands, with the degradation reported.
                     self._complete_subgoals(subgoals)
                     stopped = "done"
+                    break
+                verification_failures += 1
+                if verification_failures >= self.settings.max_verification_failures:
+                    # Repeatedly unverified: an unverified answer beats burning
+                    # the budget on another retry.
+                    stopped = "max_steps"
+                    self.emit(
+                        Notice(
+                            level="warning",
+                            text=(
+                                f"verification failed {verification_failures} times; "
+                                "returning the best current answer unverified"
+                            ),
+                        )
+                    )
                     break
                 if steps >= self.settings.max_steps:
                     stopped = "max_steps"
@@ -231,11 +278,43 @@ class Agent:
             for call in response.tool_calls:
                 tool_count += 1
                 self._mark_running(subgoals)
+                self._open_tool_sequence()
+                key = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
+                if key in seen_calls:
+                    # Loop breaker: repeating an identical call is refused with
+                    # an explicit instruction, so the model must use the
+                    # recorded result instead of spinning.
+                    self._add_note(
+                        f"The call {call.name} with the same arguments was already made earlier in this "
+                        "turn and its result is recorded in the conversation. Do not repeat it; "
+                        "use that result to conclude.",
+                        meta={"kind": "duplicate_tool_call", "tool": call.name},
+                    )
+                    outcome = ToolOutcome(
+                        tool_call=call,
+                        ok=False,
+                        output=(
+                            "duplicate call refused: this exact call already ran in this "
+                            "turn; use its recorded result"
+                        ),
+                        duration_ms=0,
+                        error="duplicate",
+                    )
+                    self._persist_tool(outcome)
+                    self.state.turn_messages.append(
+                        Message.tool_result(call.id, outcome.output, name=call.name)
+                    )
+                    self.emit(ToolFinished(outcome=outcome))
+                    continue
+                seen_calls.add(key)
                 outcome = await self._execute_tool(call, current_goal)
                 self._persist_tool(outcome)
                 self.state.turn_messages.append(Message.tool_result(call.id, outcome.output, name=call.name))
                 self.emit(ToolFinished(outcome=outcome))
+            self._close_tool_sequence()
 
+        if plan_task is not None and not plan_task.done():
+            plan_task.cancel()
         if stopped == "max_steps" and verification is None:
             self.emit(
                 Notice(
@@ -243,6 +322,15 @@ class Agent:
                     text=f"step budget exhausted after {steps} steps without a verified answer",
                 )
             )
+        if not final_text:
+            # A turn that worked but never got to speak: surface the last
+            # assistant message instead of returning silence.
+            for chunk in reversed(self.state.store.by_kind(ChunkKind.ASSISTANT_MESSAGE)):
+                if chunk.content.strip():
+                    final_text = (
+                        chunk.content + "\n\n(turn ended before a final summary; this is the last message)"
+                    )
+                    break
         result = TurnResult(
             text=final_text,
             steps=steps,
@@ -327,6 +415,8 @@ class Agent:
                     self.emit(AssistantDelta(text=event.text))
                 elif isinstance(event, ReasoningDelta):
                     self.emit(AssistantThinking(text=event.text))
+                elif isinstance(event, ToolCallProgress):
+                    self.emit(ToolWriting(name=event.name, chars=event.chars))
                 elif isinstance(event, StreamDone):
                     response = event.response
             if response is None:
@@ -374,7 +464,24 @@ class Agent:
     def _add_note(self, text: str, *, meta: dict[str, Any] | None = None) -> None:
         chunk = self.state.store.add(ChunkKind.SYSTEM_NOTE, text, meta=meta or {})
         self.emit(ChunkAdded(chunk=chunk))
-        self.state.turn_messages.append(Message.user(f"{CONTEXT_NOTE_HEADER}\n{text}"))
+        # Notes must never land between an assistant tool_calls message and its
+        # tool results — the OpenAI protocol rejects that pairing (HTTP 400).
+        # While a tool sequence is open, notes queue and flush right after the
+        # last tool result of the step.
+        note = Message.user(f"{CONTEXT_NOTE_HEADER}\n{text}")
+        if self._inside_tool_sequence:
+            self._note_queue.append(note)
+        else:
+            self.state.turn_messages.append(note)
+
+    def _open_tool_sequence(self) -> None:
+        self._inside_tool_sequence = True
+
+    def _close_tool_sequence(self) -> None:
+        self._inside_tool_sequence = False
+        if self._note_queue:
+            self.state.turn_messages.extend(self._note_queue)
+            self._note_queue.clear()
 
     # -- tools -------------------------------------------------------------
 

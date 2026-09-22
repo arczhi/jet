@@ -13,6 +13,7 @@ that survives restarts and can be re-entered at any node.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Sequence
 from typing import Any, Protocol
@@ -116,14 +117,37 @@ class Decomposer:
         proposed = await self._propose(goal, context=context, known=known or [])
         created: list[SubGoal] = []
         existing = list(known or [])
-        for text in proposed:
-            if len(existing) + len(created) >= self.max_total_subgoals:
-                break
-            if await self._is_covered(text, existing + created):
-                continue
+        candidates = proposed[: max(0, self.max_total_subgoals - len(existing))]
+        if not candidates:
+            return created
+
+        # Fan out dedup + actionable judgments for the whole batch in one
+        # parallel round trip instead of two serial judgments per candidate.
+        covered_flags, actionable_flags = await asyncio.gather(
+            asyncio.gather(
+                *[
+                    self._is_covered(
+                        text,
+                        [subgoal.text for subgoal in existing] + candidates[:index],
+                    )
+                    for index, text in enumerate(candidates)
+                ]
+            ),
+            asyncio.gather(*[self._is_actionable(text) for text in candidates]),
+        )
+        kept: list[tuple[str, bool]] = [
+            (text, actionable)
+            for text, covered, actionable in zip(
+                candidates, covered_flags, actionable_flags, strict=True
+            )
+            if not covered
+        ]
+        for text, _ in kept:
             subgoal = await self._persist(text, parent_id=parent_id, depth=depth, goal=goal)
             created.append(subgoal)
-            if not await self._is_actionable(text):
+        for index, (text, actionable) in enumerate(kept):
+            subgoal = created[index]
+            if not actionable and depth < self.max_depth:
                 children = await self.decompose(
                     text,
                     parent_id=subgoal.chunk_id,
@@ -161,13 +185,13 @@ class Decomposer:
         items = _parse_string_array(response.text)
         return items
 
-    async def _is_covered(self, candidate: str, existing: Sequence[SubGoal]) -> bool:
+    async def _is_covered(self, candidate: str, existing: Sequence[str]) -> bool:
         if not existing:
             return False
         probability = await self.judge.noul(
             {
                 "candidate": candidate,
-                "existing_subgoals": [subgoal.text for subgoal in existing],
+                "existing_subgoals": list(existing),
             },
             COVERED_INSTRUCTION,
             criteria=COVERED_CRITERIA,

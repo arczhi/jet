@@ -115,9 +115,11 @@ def app_client(
 ) -> None:
     """Open the native macOS client (local service + window)."""
     ctx = _context()
-    from jet.desktop import run_desktop
+    from jet.desktop import resolve_startup_workspace, run_desktop
 
-    raise typer.Exit(code=run_desktop(ctx.settings, port=port, open_browser=browser))
+    explicit = str(ctx.settings.workspace) != str(Path.cwd().resolve())
+    settings = resolve_startup_workspace(ctx.settings, explicit=explicit)
+    raise typer.Exit(code=run_desktop(settings, port=port, open_browser=browser))
 
 
 async def _run_task(context: CliContext, task: str) -> int:

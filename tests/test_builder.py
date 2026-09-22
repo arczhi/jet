@@ -20,6 +20,7 @@ def builder(judge: Judge, *, budget: int) -> ContextBuilder:
         summarizer=TruncatingSummarizer(),
         short_tokens=5,
         long_tokens=10,
+        small_pool=0,
     )
     return ContextBuilder(attention, budget_tokens=budget)
 

@@ -3,8 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="light" />
+  <meta name="color-scheme" content="light dark" />
   <title>jet</title>
+  <script>
+    try {
+      const saved = localStorage.getItem("jet-theme");
+      document.documentElement.dataset.theme = saved === "dark" ? "dark" : "light";
+    } catch {
+      document.documentElement.dataset.theme = "light";
+    }
+  </script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%235ab5f5'/%3E%3Cstop offset='1' stop-color='%232e86cf'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M25.6 6.4 6.4 17.2l6.8 1.2 1.2 6.8z' fill='%23fff'/%3E%3Cpath d='M15.6 17.2l10-10.8' stroke='%23bfe0f7' stroke-width='1.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
@@ -19,8 +27,19 @@
       <span class="conn" id="conn" title="connected"><span class="conn-dot"></span></span>
       <span class="working" id="working" hidden>step <b id="step-num">1</b></span>
     </div>
-    <div class="models" id="models">—</div>
-    <button class="ghost small" id="new-session" title="Start a new session">New</button>
+    <div class="topbar-actions">
+      <button class="workspace-chip" id="workspace-chip" title="打开工作目录">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5A2 2 0 0 1 5.5 4.5h3.6c.5 0 1 .2 1.3.6l1 1.4h6.6a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2z" fill="currentColor" opacity=".22"/><path d="M3.5 6.5A2 2 0 0 1 5.5 4.5h3.6c.5 0 1 .2 1.3.6l1 1.4h6.6a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        <span class="chip-label" id="workspace-name">—</span>
+        <span class="chip-suffix" data-i18n="chipOpen">Open folder…</span>
+      </button>
+      <button class="ghost theme-toggle" id="theme-toggle" title="Switch to night mode" aria-label="Theme"></button>
+      <div class="segmented tiny lang-switch" id="lang-switch" role="group" aria-label="Language">
+        <button data-lang="en" class="active">EN</button>
+        <button data-lang="zh">中文</button>
+      </div>
+      <button class="ghost small" id="new-session" title="Start a new session" data-i18n="new" data-i18n-title="newTitle">New</button>
+    </div>
   </header>
 
   <main>
@@ -31,24 +50,23 @@
             <svg viewBox="0 0 32 32"><path d="M25.6 6.4 6.4 17.2l6.8 1.2 1.2 6.8z" fill="#fff"/><path d="M15.6 17.2l10-10.8" stroke="#bfe0f7" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>
           </div>
           <h1>jet</h1>
-          <p class="empty-lede">A fast coding agent for this workspace. It plans, acts in
-             small verified steps, and shows you exactly the context it chose to see.</p>
-          <div class="starters">
-            <button class="starter" data-task="Explain the architecture of src/jet/ in a few paragraphs.">Explain the architecture of src/jet/</button>
-            <button class="starter" data-task="Find every TODO and FIXME in this codebase and summarize them by theme.">Summarize all TODOs by theme</button>
-            <button class="starter" data-task="Read README.md and suggest concrete improvements.">Review README.md</button>
-          </div>
-          <p class="hint"><kbd>⌘↵</kbd> send · <kbd>⌘.</kbd> stop · approvals appear as dialogs</p>
+          <p class="empty-lede" data-i18n="emptyLede">Jet-fast. A small model judges in milliseconds; the big model only sees key context.</p>
+          <p class="hint" data-i18n="emptyHint"><kbd>⌘↵</kbd> send · <kbd>⌘.</kbd> stop · approvals appear as dialogs</p>
         </div>
       </div>
       <button class="jump" id="jump" hidden title="Jump to latest">↓ latest</button>
       <footer class="composer">
         <div class="composer-box">
-          <textarea id="input" rows="1" placeholder="Ask jet to do something in this workspace…" spellcheck="false"></textarea>
+          <textarea id="input" rows="1" placeholder="Give jet a task and it takes off…" spellcheck="false" data-i18n-placeholder="placeholderIdle"></textarea>
           <div class="composer-actions">
+            <div class="segmented tiny mode-switch" id="approval-mode" role="group" aria-label="Approval mode">
+              <button data-mode="ask" class="active">Ask</button>
+              <button data-mode="auto">Auto</button>
+              <button data-mode="deny">Deny</button>
+            </div>
             <span class="kbd-hint"><kbd>⌘↵</kbd></span>
-            <button id="stop" class="danger" hidden>Stop</button>
-            <button id="send" class="primary">Send</button>
+            <button id="stop" class="danger" hidden data-i18n="stop">Stop</button>
+            <button id="send" class="primary" data-i18n="launch">Launch</button>
           </div>
         </div>
       </footer>
@@ -82,31 +100,81 @@
           <dt>tokens</dt><dd id="s-usage">—</dd>
           <dt>cost</dt><dd id="s-cost">—</dd>
         </dl>
-        <div class="approval-row">
-          <span class="row-label">approvals</span>
-          <div class="segmented mini" id="approval-mode" role="group" aria-label="Approval mode">
-            <button data-mode="ask" class="active">Ask</button>
-            <button data-mode="auto">Auto</button>
-            <button data-mode="deny">Deny</button>
-          </div>
-        </div>
         <h3 class="section-title">Recent chunks</h3>
         <ul class="recent" id="s-recent"></ul>
       </div>
     </aside>
   </main>
 
+  <div class="modal-backdrop" id="setup-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="setup-title">
+      <h2 id="setup-title" data-i18n="setupTitle">Welcome to jet — connect your models</h2>
+      <p class="setup-lede" data-i18n="setupLede">Enter the two API keys. Endpoints are prefilled with the official addresses and can be edited. Credentials stay on this machine in <code>~/.jet/credentials.json</code> (mode 600), never in any repository.</p>
+      <div class="setup-provider">
+        <div class="provider-head"><span class="provider-name" data-i18n="deepseekName">DeepSeek</span><span class="provider-role" data-i18n="deepseekRole">generation + verification · required</span></div>
+        <label class="field"><span data-i18n="labelEndpoint">Endpoint</span>
+          <input id="setup-llm-url" type="text" value="https://api.deepseek.com" spellcheck="false" />
+        </label>
+        <label class="field"><span data-i18n="labelKey">API Key</span>
+          <input id="setup-llm-key" type="password" placeholder="sk-…" spellcheck="false" autocomplete="off" />
+        </label>
+        <label class="field"><span data-i18n="labelModel">Model</span>
+          <input id="setup-llm-model" type="text" value="deepseek-flash" spellcheck="false" />
+        </label>
+      </div>
+      <div class="setup-provider">
+        <div class="provider-head"><span class="provider-name" data-i18n="jevName">Jev · TypeSafe</span><span class="provider-role" data-i18n="jevRole">fast judgment (routing / filtering / gating) · recommended</span></div>
+        <label class="field"><span data-i18n="labelEndpoint">Endpoint</span>
+          <input id="setup-jev-url" type="text" value="https://api.typesafe.ai" spellcheck="false" />
+        </label>
+        <label class="field"><span data-i18n="labelKey">API Key</span>
+          <input id="setup-jev-key" type="password" placeholder="apikey_…" spellcheck="false" autocomplete="off" />
+        </label>
+        <p class="field-hint" data-i18n="jevHint">Leave empty to use the offline mock judge (usable, but without RLCD's smart context filtering)</p>
+      </div>
+      <p class="setup-error" id="setup-error" hidden></p>
+      <div class="modal-actions">
+        <button class="primary" id="setup-save" data-i18n="setupSave">Save and connect</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="dir-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dir-title">
+      <h2 id="dir-title" data-i18n="dirTitle">Choose the workspace directory</h2>
+      <div class="dir-crumbs">
+        <button class="crumb" id="dir-up" title="Parent directory" data-i18n="dirUp">↑ Up</button>
+        <span class="crumb-path mono" id="dir-current">—</span>
+      </div>
+      <ul class="dir-list" id="dir-list"></ul>
+      <div class="modal-actions">
+        <button class="ghost" id="dir-cancel" data-i18n="cancel">Cancel</button>
+        <button class="primary" id="dir-choose" data-i18n="dirChoose">Use this directory</button>
+      </div>
+      <p class="hint" data-i18n="dirHint">The last opened directory is restored on launch</p>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="approval-backdrop" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="approval-title">
-      <h2 id="approval-title">Approval needed</h2>
+      <h2 id="approval-title" data-i18n="approvalTitle">Approval needed</h2>
       <p class="approval-tool" id="approval-tool"></p>
       <pre class="approval-args" id="approval-args"></pre>
       <p class="approval-reason" id="approval-reason"></p>
-      <div class="modal-actions">
-        <button class="ghost" id="approval-deny">Deny</button>
-        <button class="primary" id="approval-allow">Allow</button>
+      <div class="approval-mode-row">
+        <span class="row-label" data-i18n="modeLabel">Approval mode</span>
+        <div class="segmented mini mode-switch" id="approval-mode-modal" role="group" aria-label="Approval mode">
+          <button data-mode="ask">Ask</button>
+          <button data-mode="auto">Auto</button>
+          <button data-mode="deny">Deny</button>
+        </div>
+        <span class="hint-inline" data-i18n="modeInline">Applies to later actions; this one still needs Allow / Deny</span>
       </div>
-      <p class="hint"><kbd>y</kbd> allow · <kbd>n</kbd>/<kbd>esc</kbd> deny · this decision is final for this action</p>
+      <div class="modal-actions">
+        <button class="ghost" id="approval-deny" data-i18n="deny">Deny</button>
+        <button class="primary" id="approval-allow" data-i18n="allow">Allow</button>
+      </div>
+      <p class="hint" data-i18n="approvalHint"><kbd>y</kbd> allow · <kbd>n</kbd>/<kbd>esc</kbd> deny · this decision is final for this action</p>
     </div>
   </div>
 

@@ -44,6 +44,8 @@ class ContextBuilt:
     tokens: int
     hidden_chunks: int
     dropped_verbatim: int = 0
+    verbatim_messages: int = 0
+    verbatim_tokens: int = 0
     views: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -69,6 +71,14 @@ class AssistantMessage:
 class ToolProposed:
     call: ToolCall
     spec: ToolSpec
+
+
+@dataclass(frozen=True)
+class ToolWriting:
+    """A tool call is streaming in (e.g. a large file being written)."""
+
+    name: str
+    chars: int
 
 
 @dataclass(frozen=True)
@@ -112,6 +122,7 @@ AgentEvent = (
     | AssistantThinking
     | AssistantMessage
     | ToolProposed
+    | ToolWriting
     | ApprovalRequested
     | ToolFinished
     | ChunkAdded

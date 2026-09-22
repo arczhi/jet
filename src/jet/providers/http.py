@@ -60,6 +60,7 @@ class HttpTransport:
         provider: str = "provider",
         extra_headers: Mapping[str, str] | None = None,
         client: httpx.AsyncClient | None = None,
+        idle_timeout_s: float = 90.0,
     ):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -67,6 +68,7 @@ class HttpTransport:
         self.max_retries = max_retries
         self.provider = provider
         self.extra_headers = dict(extra_headers or {})
+        self.idle_timeout_s = idle_timeout_s
         self._client = client
         self._owns_client = client is None
 
@@ -126,7 +128,13 @@ class HttpTransport:
         raise last_error or ProviderError(f"{self.provider}: request failed")
 
     async def stream_sse(self, path: str, payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
-        """Yield decoded ``data:`` objects from a Server-Sent Events response."""
+        """Yield decoded ``data:`` objects from a Server-Sent Events response.
+
+        A per-line idle watchdog bounds a stalled stream: generation deltas keep
+        flowing steadily, so silence for ``idle_timeout_s`` means a hung
+        connection — a plain read timeout cannot catch it, because it resets on
+        every trickle byte.
+        """
         url = f"{self.base_url}{path}"
         last_error: ProviderError | None = None
         for attempt in range(self.max_retries + 1):
@@ -136,7 +144,16 @@ class HttpTransport:
                     if response.status_code >= 400:
                         body = (await response.aread()).decode("utf-8", "replace")
                         raise_for_status(response.status_code, body, self.provider)
-                    async for line in response.aiter_lines():
+                    lines_iter = response.aiter_lines().__aiter__()
+                    while True:
+                        try:
+                            line = await asyncio.wait_for(lines_iter.__anext__(), timeout=self.idle_timeout_s)
+                        except TimeoutError as exc:
+                            raise ProviderUnavailableError(
+                                f"{self.provider}: stream idle for {self.idle_timeout_s:.0f}s"
+                            ) from exc
+                        except StopAsyncIteration:
+                            break
                         if not line or line.startswith(":"):
                             continue
                         if not line.startswith("data:"):

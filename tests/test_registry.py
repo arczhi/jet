@@ -87,3 +87,11 @@ def test_profile_prices_reach_the_provider() -> None:
     provider = build_llm_provider(settings)
     assert provider.input_price == 1.5  # type: ignore[attr-defined]
     assert provider.output_price == 7.0  # type: ignore[attr-defined]
+
+
+def test_profile_has_a_finite_default_max_tokens() -> None:
+    """A degenerate generation must not stream forever (read timeout can't fire)."""
+    provider = build_llm_provider(
+        Settings(llm_profiles={"default": LLMProfile(base_url="http://x", model="m")})
+    )
+    assert provider.default_max_tokens == 65_536  # type: ignore[attr-defined]

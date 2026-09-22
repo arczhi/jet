@@ -18,6 +18,10 @@ Rules:
   the working memory above.
 - Read files with `read_file`/`list_files`/`glob`/`grep`, never with shell
   commands like `head`, `cat`, or `ls` — shell execution needs user approval.
+- After the deliverable exists and any requested launch command has run, reply
+  with a short summary and stop. Do not invent extra verification harnesses
+  (verification scripts, HTML parsers, repeated greps) unless the user asked
+  for tests; verify once at most, then conclude.
 - Read a file before editing it. Prefer `edit_file` for small changes, `write_file` for new files.
 - Paths are workspace-relative. Do not attempt to leave the workspace.
 - If an action is denied by policy, that decision is final. Do not retry it or work around it.

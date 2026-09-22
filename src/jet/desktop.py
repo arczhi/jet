@@ -27,13 +27,16 @@ STARTUP_TIMEOUT_S = 15.0
 
 
 def build_manager(settings: Settings, agent_factory: AgentFactory | None = None) -> TurnManager:
-    if agent_factory is not None:
-        return TurnManager(agent_factory, settings)
+    def factory_builder(resolved: Settings) -> AgentFactory:
+        if agent_factory is not None:
+            return agent_factory
 
-    def factory(emit: EventSink, approve: Approver) -> Agent:
-        return cast(Agent, create_agent(settings, emit=emit, approve=approve))
+        def factory(emit: EventSink, approve: Approver) -> Agent:
+            return cast(Agent, create_agent(resolved, emit=emit, approve=approve))
 
-    return TurnManager(factory, settings)
+        return factory
+
+    return TurnManager(factory_builder, settings)
 
 
 def pick_port(preferred: int) -> int:
@@ -104,6 +107,45 @@ def _apply_light_titlebar(native_window: Any) -> None:
         native_window.setAppearance_(appearance)
 
 
+def resolve_startup_workspace(settings: Settings, *, explicit: bool) -> Settings:
+    """Restore the last opened directory unless the user pointed at one now."""
+    from pathlib import Path
+
+    from jet.state import read_state
+
+    if explicit:
+        return settings
+    last = read_state(settings.home).get("last_workspace")
+    if isinstance(last, str) and Path(last).expanduser().is_dir():
+        return settings.model_copy(update={"workspace": Path(last).expanduser().resolve()})
+    return settings
+
+
+class DesktopApi:
+    """Bridge exposed to the page as ``window.pywebview.api``.
+
+    ``select_folder`` opens the native macOS folder dialog and returns the chosen
+    path (or None when the dialog is dismissed). The page falls back to its
+    built-in directory browser when this bridge is absent (browser mode).
+    """
+
+    def __init__(self, window: Any | None = None) -> None:
+        self.window = window
+
+    def attach(self, window: Any) -> None:
+        self.window = window
+
+    def select_folder(self) -> str | None:
+        import webview
+
+        if self.window is None:
+            return None
+        result = self.window.create_file_dialog(webview.FOLDER_DIALOG, allow_multiple=False)
+        if result:
+            return str(result[0])
+        return None
+
+
 def run_desktop(settings: Settings, *, port: int = 8765, open_browser: bool = False) -> int:
     server = DesktopServer(settings, port=port)
     server.start()
@@ -116,6 +158,7 @@ def run_desktop(settings: Settings, *, port: int = 8765, open_browser: bool = Fa
                 print(f"jet: opening {server.url} in your browser instead")
                 open_browser = True
             else:
+                api = DesktopApi()
                 window = webview.create_window(
                     "jet",
                     server.url,
@@ -123,8 +166,10 @@ def run_desktop(settings: Settings, *, port: int = 8765, open_browser: bool = Fa
                     height=860,
                     min_size=(980, 640),
                     background_color="#f3f8fd",
+                    js_api=api,
                 )
                 assert window is not None
+                api.attach(window)
                 window.events.before_show += lambda: _apply_light_titlebar(window.native)
                 webview.start()
                 return 0

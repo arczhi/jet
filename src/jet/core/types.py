@@ -119,6 +119,15 @@ class ReasoningDelta:
 
 
 @dataclass(frozen=True)
+class ToolCallProgress:
+    """Streaming tool-call build-up, so long writes show live progress."""
+
+    index: int
+    name: str
+    chars: int
+
+
+@dataclass(frozen=True)
 class ToolCallsReady:
     calls: list[ToolCall]
 
@@ -128,7 +137,7 @@ class StreamDone:
     response: LLMResponse
 
 
-StreamEvent = TextDelta | ReasoningDelta | ToolCallsReady | StreamDone
+StreamEvent = TextDelta | ReasoningDelta | ToolCallProgress | ToolCallsReady | StreamDone
 
 
 # --- RLCD context -----------------------------------------------------------

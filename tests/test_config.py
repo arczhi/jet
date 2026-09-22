@@ -43,6 +43,25 @@ def test_typesafe_key_alias(monkeypatch: pytest.MonkeyPatch) -> None:
     assert Settings().typesafe_api_key == "apikey_prefixed"
 
 
+def test_credentials_layer_provides_the_typesafe_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Regression: the setup dialog's saved key must survive the alias lookup."""
+    from jet.config import save_credentials
+
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.delenv("JET_TYPESAFE_API_KEY", raising=False)
+    monkeypatch.setenv("JET_HOME", str(tmp_path / "home"))
+    save_credentials(
+        {
+            "typesafe_api_key": "apikey_from_dialog",
+            "llm_profile": "official",
+            "llm_profiles": {"official": {"base_url": "http://x", "api_key": "k", "model": "m"}},
+        }
+    )
+    settings = Settings()
+    assert settings.typesafe_api_key == "apikey_from_dialog"
+    assert settings.active_llm.base_url == "http://x"
+
+
 def test_toml_file_is_read(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config = write_toml(
         tmp_path / "jet.toml",

@@ -31,6 +31,10 @@ class TurnBusyError(JetError):
     """A turn is already running; the client must wait or cancel it."""
 
 
+class SetupRequiredError(JetError):
+    """Provider credentials are missing; the client must show the setup dialog."""
+
+
 @dataclass
 class TurnRecord:
     id: str
@@ -44,12 +48,22 @@ class TurnRecord:
 
 
 class TurnManager:
-    def __init__(self, agent_factory: AgentFactory, settings: Settings):
+    def __init__(
+        self,
+        factory_builder: Callable[[Any], AgentFactory],
+        settings: Settings,
+    ):
+        """``factory_builder`` maps (possibly reloaded) settings to an agent factory.
+
+        It is re-invoked on ``reload`` so a first-run credentials save produces
+        a working agent — the original settings object must never be reused.
+        """
         self.settings = settings
-        self._factory = agent_factory
+        self._factory_builder = factory_builder
         self._agent: Any = None
         self._turn: TurnRecord | None = None
         self._closed = False
+        self._setup_error: str | None = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -61,7 +75,51 @@ class TurnManager:
 
     async def startup(self) -> None:
         if self._agent is None:
-            self._agent = self._factory(self._emit, self._approve)
+            from jet.errors import ConfigError
+
+            try:
+                self._agent = self._factory_builder(self.settings)(self._emit, self._approve)
+            except ConfigError as exc:
+                # First-run without credentials: boot into the setup state
+                # instead of failing the whole service.
+                self._setup_error = str(exc)
+                self._agent = None
+
+    async def reload(self) -> dict[str, Any]:
+        """Rebuild the engine after a settings change (e.g. first-run setup).
+
+        Settings are re-resolved from every source so the freshly saved
+        credentials layer actually applies; runtime choices (workspace,
+        approval mode) carry over.
+        """
+        from jet.config import load_settings
+
+        fresh = load_settings(workspace=self.settings.workspace)
+        self.settings = fresh.model_copy(update={"approval_mode": self.settings.approval_mode})
+        if self._agent is not None:
+            await self._agent.aclose()
+            self._agent = None
+        self._setup_error = None
+        await self.startup()
+        return self.state()
+
+    @property
+    def setup_error(self) -> str | None:
+        return self._setup_error
+
+    def missing_setup(self) -> list[str]:
+        """Which provider credentials the user still needs to enter."""
+        missing: list[str] = []
+        if self.settings.judge_provider == "typesafe" and not self.settings.typesafe_api_key:
+            missing.append("jev")
+        try:
+            profile = self.settings.active_llm
+        except JetError:
+            missing.append("deepseek")
+        else:
+            if profile.model != "mock" and not profile.base_url:
+                missing.append("deepseek")
+        return missing
 
     async def shutdown(self) -> None:
         self._closed = True
@@ -77,8 +135,29 @@ class TurnManager:
             raise TurnBusyError("cancel the running turn before starting a new session")
         if self._agent is not None:
             await self._agent.aclose()
-        self._agent = self._factory(self._emit, self._approve)
+        self._agent = self._factory_builder(self.settings)(self._emit, self._approve)
         return str(self._agent.session_id)
+
+    async def switch_workspace(self, raw_path: str) -> dict[str, Any]:
+        """Point the whole engine at a new directory and start a fresh session.
+
+        The choice is persisted so the next app launch opens the same directory.
+        """
+        from pathlib import Path
+
+        from jet.errors import JetError
+        from jet.state import update_state
+
+        resolved = Path(raw_path).expanduser()
+        if not resolved.is_dir():
+            raise JetError(f"not a directory: {raw_path}")
+
+        if self._turn and not self._turn.finished:
+            raise TurnBusyError("cancel the running turn before switching directories")
+        self.settings.workspace = resolved.resolve()
+        await self.new_session()
+        update_state(self.settings.home, last_workspace=str(self.settings.workspace))
+        return self.state()
 
     # -- turns -------------------------------------------------------------
 
@@ -92,6 +171,10 @@ class TurnManager:
         return None
 
     async def start_turn(self, task: str) -> TurnRecord:
+        if self._agent is None:
+            raise SetupRequiredError(
+                self._setup_error or "provider credentials are missing; complete the setup dialog first"
+            )
         if self._turn is not None and not self._turn.finished:
             raise TurnBusyError("a turn is already running")
         record = TurnRecord(id=_new_turn_id(), task=task)
@@ -222,13 +305,29 @@ class TurnManager:
     def state(self) -> dict[str, Any]:
         agent = self._agent
         settings = self.settings
+        from jet.state import read_state
+
+        ui_state = read_state(settings.home)
+        try:
+            llm_base_url = settings.active_llm.base_url or ""
+            llm_model = settings.llm_model
+            verifier_model = settings.verifier_llm().model
+        except JetError:
+            llm_base_url, llm_model, verifier_model = "", "", ""
         payload: dict[str, Any] = {
             "workspace": str(settings.workspace),
+            "theme": ui_state.get("theme") or "light",
+            "lang": ui_state.get("lang") or "en",
+            "setup_required": bool(self.missing_setup()),
+            "setup_missing": self.missing_setup(),
+            "setup_error": self._setup_error,
+            "typesafe_base_url": settings.typesafe_base_url,
+            "llm_base_url": llm_base_url,
             "judge": settings.judge_provider,
             "llm_profile": settings.llm_profile,
-            "llm_model": settings.llm_model,
+            "llm_model": llm_model,
             "verifier_profile": settings.verifier_llm_profile,
-            "verifier_model": settings.verifier_llm().model,
+            "verifier_model": verifier_model,
             "approval_mode": settings.approval_mode,
             "busy": bool(self._turn and not self._turn.finished),
         }

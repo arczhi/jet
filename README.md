@@ -1,116 +1,97 @@
-# jet
+<p align="center">
+  <img src="docs/logo.svg" alt="jet logo" width="84" />
+</p>
 
-A coding agent built on **TypeSafe** judgments and **Recursive LLM Context
-Decomposition (RLCD)**.
+<h1 align="center">jet</h1>
 
-> Author: **alex (arczhi)** · License: **CC BY-NC 4.0** — free to share and adapt
-> with attribution; **commercial use is not permitted**. See [LICENSE](LICENSE).
+<p align="center">
+  A fast coding agent built on <strong>TypeSafe</strong> judgments and
+  <strong>Recursive LLM Context Decomposition (RLCD)</strong>.<br/>
+  Named for takeoff speed: a small judgment model decides in milliseconds,
+  the big model only sees key context.
+</p>
 
-jet does not carry one ever-growing transcript. State is explicit, decomposed
-into a tree of typed chunks, and a fast System One model (`Jev` / any
-OpenAI-compatible judgment endpoint such as `laya-mlx`) continuously scores what
-should be in the next context window — hide it, summarize it, or include it in
-full. The large LLM (default: `deepseek-v4.1-flash`) is only used for generation
-and verification.
+<p align="center">
+  <img src="docs/demo.gif" width="760" alt="jet demo" />
+</p>
 
-Named for speed: most decision traffic goes to the small judgment model, the
-expensive model sees a small, query-shaped context.
+> Demo run (recording above): **done in 76s** — 12 steps · 10 tool calls ·
+> 177k tokens · cross-model verified. jet built an offline WebAudio music
+> player end-to-end: streamed answer with live thinking, tool calls with
+> real-time write progress, then `open index.html` in the browser.
 
-## Install
+License: **CC BY-NC 4.0** — free to share and adapt with attribution; commercial
+use is not permitted. See [LICENSE](LICENSE). Author: **alex (arczhi)**.
+
+## Why it is fast
+
+Most agent latency is spent feeding a huge transcript to one big model. jet
+flips that: **state is explicit, decisions are cheap**.
+
+- **RLCD context engine** — everything is a typed chunk in a SQLite tree. No
+  compaction: a fast judgment model scores what belongs in the next context
+  window (hide / one-line note / summary / full text), and the big model only
+  ever sees what matters.
+- **Judgment-first routing** — `Jev` (TypeSafe System One) handles context
+  selection, tool routing, plan gating, permission advice, and verification.
+  Any OpenAI-compatible local model (laya-mlx) works too.
+- **Small model answers are free** — disk-cached by content hash, so identical
+  decisions are never paid for twice (a real run: 17/22 cache hits).
+
+## What is in the box
+
+- Pluggable providers: judgment models (TypeSafe/Jev, laya-mlx) and LLM
+  profiles (official DeepSeek, OpenCode Go, any OpenAI-compatible endpoint).
+- Policy-gated tools with human approval dialogs; deterministic rules first,
+  the judgment model can only tighten, and everything fails closed.
+- Cross-model verification: the generator is checked by a different model;
+  inconclusive verdicts degrade honestly instead of spinning.
+- A native macOS client (local FastAPI + SSE service + WKWebView window) with
+  plan / context / session panes, approvals, night mode, and 中文/English UI.
+- Full tracing: every judgment, LLM turn, tool call, and policy decision lands
+  in a per-session JSONL file. Cost and token accounting included.
+
+## Quick start
 
 ```bash
 uv sync
 cp .env.example .env   # fill in keys
-uv run jet doctor      # verify config and provider reachability
+uv run jet doctor      # verify providers
 uv run jet app         # native macOS client
-uv run jet             # terminal client
-uv run jet run "explain src/jet/agent/loop.py"
 ```
 
-## The client
-
-`jet app` starts a local HTTP/SSE service and opens a real window (WKWebView via
-pywebview) on macOS; `--browser` uses your default browser instead.
-
-The window is a thin view over the same engine events the terminal client uses:
-
-- transcript with streamed answers, tool cards, and verification chips
-- **Plan** pane — the RLCD subgoal tree with live status
-- **Context** pane — every chunk the meta-attention pass selected for the current
-  step, with its level (`full` / `summary` / `note`) and token cost
-- **Session** pane — models in use, chunks, tokens, cost, trace path
-- approval dialogs with Allow/Deny (⌘↵ send, ⌘. stop, y/n decide)
-- approval mode is switchable at runtime (Ask / Auto / Deny); agents never
-  auto-approve silently in Ask mode
-
-Everything the client shows is persisted: chunks in
-`~/.jet/sessions/<id>/chunks.db`, decisions in `trace.jsonl`, judgments in
-`~/.jet/cache/judgments.db`.
-
-## Configuration
-
-Config resolves in this order (highest priority first):
-
-1. CLI flags
-2. environment variables (`JET_*`)
-3. `.env` in the project
-4. `jet.toml` in the project, then `~/.config/jet/config.toml`
-5. defaults
-
-Key variables (see `.env.example`):
-
-| Variable | Meaning |
-| --- | --- |
-| `JET_JUDGE_PROVIDER` | `typesafe`, `openai_compat`, or `mock` |
-| `JET_TYPESAFE_BASE_URL` / `JET_TYPESAFE_API_KEY` / `JET_TYPESAFE_MODEL` | Jev via TypeSafe API |
-| `JET_JUDGE_OPENAI_BASE_URL` / `JET_JUDGE_OPENAI_API_KEY` / `JET_JUDGE_OPENAI_MODEL` | local judgment model (laya-mlx) |
-| `JET_LLM_PROFILE` | active LLM profile name |
-| `JET_LLM_PROFILES` | JSON map of named LLM endpoints (`base_url`, `api_key`, `model`, `extra_headers`, prices) |
-| `JET_VERIFIER_LLM_PROFILE` | optional different LLM for verification (cross-model review) |
-
-Example: generate with OpenCode Go, verify with the official DeepSeek API.
-
-```bash
-JET_LLM_PROFILE=zen
-JET_VERIFIER_LLM_PROFILE=official
-JET_LLM_PROFILES={"zen":{"base_url":"https://opencode.ai/zen/go/v1","api_key":"...","model":"deepseek-v4.1-flash","extra_headers":{"x-opencode-session":"{session_id}"}},"official":{"base_url":"https://api.deepseek.com","api_key":"...","model":"deepseek-flash"}}
-```
-
-Secrets are never written to the repo. Judgment results are cached on disk by
-content hash, so identical decisions are not paid for twice.
+First launch opens a setup dialog for the two API keys (DeepSeek for generation
++ verification, TypeSafe/Jev for judgment) — endpoints are prefilled, keys are
+probed on save, and everything stays on your machine.
 
 ## Architecture
 
 ```text
 input -> context assembly (RLCD) -> routing -> generation -> tool policy -> execution
-              ^                                              |
-              +------------- chunks / judgments <-------------+
+             ^                                              |
+             +------------ chunks / judgments <--------------+
 ```
 
-- `providers/` — plugin contract for judgment models and LLMs; both are
-  swappable by config.
-- `context/` — chunk store, recursive decomposition of goals, meta-attention
-  scoring, budget-aware context builder.
-- `tools/` — tool catalog exposed as compact snippets; full schemas are injected
-  only for the tools a judgment pass selects.
-- `policy/` — deterministic rules first; judgment and human approval for
-  ambiguous operations. Fails closed.
-- `agent/` — the loop, session persistence, verification.
-- `server/` — FastAPI + SSE service and the single-page client for the desktop window.
-- `tracing.py` — every judgment, LLM turn, tool call, and policy decision is
-  written to a JSONL trace per session for audit and cost accounting.
+- `providers/` — plugin contract for judgment models and LLMs
+- `context/` — chunk store, recursive decomposition, meta-attention,
+  budgeted context builder, conditional AGENTS.md memory
+- `tools/` — fs / search / shell tools; compact snippets in the prompt, full
+  schemas injected only for the tools a judgment pass selects
+- `policy/` — deterministic rules first; judgment may only tighten
+- `agent/` — the loop, session persistence, verification
+- `server/` — HTTP/SSE service and the single-page client
+- `tracing.py` — per-session JSONL trace for audit and cost
 
 ## Development
 
 ```bash
 make ci      # lint + typecheck + tests (unit + HTTP integration)
 make smoke   # end-to-end run against a local fake provider
+make demo    # record or regenerate docs/demo.gif
 make app     # native macOS client
-make run     # terminal client
 ```
 
 ## License
 
-[CC BY-NC 4.0](LICENSE) © alex (arczhi). You may share and modify this project
-freely for non-commercial purposes, provided you credit the original author and
-indicate changes.
+[CC BY-NC 4.0](LICENSE) © alex (arczhi). Share and modify freely for
+non-commercial purposes, credit the original author and indicate changes.

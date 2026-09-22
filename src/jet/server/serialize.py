@@ -21,6 +21,7 @@ from jet.core.events import (
     StepStarted,
     ToolFinished,
     ToolProposed,
+    ToolWriting,
     TurnFinished,
     TurnStarted,
     Verified,
@@ -40,6 +41,9 @@ def serialize_event(event: Any) -> dict[str, Any] | None:
             "messages": event.messages,
             "tokens": event.tokens,
             "hidden_chunks": event.hidden_chunks,
+            "dropped_verbatim": event.dropped_verbatim,
+            "verbatim_messages": event.verbatim_messages,
+            "verbatim_tokens": event.verbatim_tokens,
             "views": event.views,
         }
     if isinstance(event, AssistantDelta):
@@ -62,6 +66,8 @@ def serialize_event(event: Any) -> dict[str, Any] | None:
             "danger": event.spec.danger.value,
             "read_only": event.spec.read_only,
         }
+    if isinstance(event, ToolWriting):
+        return {"type": "tool_writing", "name": event.name, "chars": event.chars}
     if isinstance(event, ToolFinished):
         outcome = event.outcome
         return {

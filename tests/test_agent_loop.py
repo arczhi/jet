@@ -89,6 +89,42 @@ async def test_tool_call_executes_and_result_enters_state(settings: Settings) ->
     await agent.aclose()
 
 
+async def test_denied_tool_keeps_protocol_pairing(settings: Settings, workspace: Path) -> None:
+    """A denied call must never wedge a note between tool_calls and its result."""
+    ask_settings = settings.model_copy(update={"approval_mode": "ask"})
+    llm = make_llm(
+        MockTurn(tool_calls=[ToolCall("c1", "write_file", {"path": "blocked.txt", "content": "x"})]),
+        MockTurn(text="The write was denied, so I stopped."),
+    )
+    agent = build(ask_settings, llm=llm)
+    result = await agent.run_turn("write blocked.txt")
+    assert result.stopped_reason == "done"
+    second_call = llm.calls[1]
+    for index, message in enumerate(second_call):
+        if message.tool_calls:
+            following = second_call[index + 1]
+            assert following.role.value == "tool", "note interleaved into tool pairing"
+            assert following.tool_call_id == message.tool_calls[0].id
+    await agent.aclose()
+
+
+async def test_duplicate_tool_call_is_refused(settings: Settings) -> None:
+    """A repeated identical call gets an explicit refusal, not another run."""
+    llm = make_llm(
+        MockTurn(tool_calls=[ToolCall("c1", "read_file", {"path": "a.txt"})]),
+        MockTurn(tool_calls=[ToolCall("c2", "read_file", {"path": "a.txt"})]),
+        MockTurn(text="done"),
+    )
+    agent = build(settings, llm=llm)
+    result = await agent.run_turn("read a.txt")
+    assert result.stopped_reason == "done"
+    tool_chunks = agent.store.by_kind(ChunkKind.TOOL_RESULT)
+    assert any("duplicate call refused" in chunk.content for chunk in tool_chunks)
+    notes = agent.store.by_kind(ChunkKind.SYSTEM_NOTE)
+    assert any(note.meta.get("kind") == "duplicate_tool_call" for note in notes)
+    await agent.aclose()
+
+
 async def test_unknown_tool_is_reported_not_crashed(settings: Settings) -> None:
     llm = make_llm(
         MockTurn(tool_calls=[ToolCall("c1", "teleport", {"where": "mars"})]),

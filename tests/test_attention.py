@@ -18,13 +18,14 @@ def add_chunks(store: ChunkStore, count: int, *, size: int = 40) -> list[str]:
     return ids
 
 
-def attention(judge: Judge, *, batch_size: int = 24) -> MetaAttention:
+def attention(judge: Judge, *, batch_size: int = 24, small_pool: int = 0) -> MetaAttention:
     return MetaAttention(
         judge,
         batch_size=batch_size,
         summarizer=TruncatingSummarizer(),
         short_tokens=5,
         long_tokens=20,
+        small_pool=small_pool,
     )
 
 
@@ -41,7 +42,7 @@ async def test_score_thresholds_map_to_levels(store: ChunkStore) -> None:
     ids = add_chunks(store, 4)
     scores = {ids[0]: 3.0, ids[1]: 2.0, ids[2]: 1.0, ids[3]: 0.0}
     judge = make_judge(on_score=lambda key, question: scores[key])
-    result = await attention(judge).rank(task="task", chunks=store.all())
+    result = await attention(judge).rank(task="task", chunks=store.all(), memory_budget=30)
     levels = {view.chunk.id: view.level for view in result.views}
     assert levels[ids[0]] is AttentionLevel.FULL
     assert levels[ids[1]] is AttentionLevel.LONG
@@ -52,7 +53,7 @@ async def test_score_thresholds_map_to_levels(store: ChunkStore) -> None:
 async def test_summaries_are_shorter_than_full_content(store: ChunkStore) -> None:
     chunk = store.add(ChunkKind.TOOL_RESULT, "word " * 400)
     judge = make_judge(default_score=2.0)
-    result = await attention(judge).rank(task="task", chunks=[chunk])
+    result = await attention(judge).rank(task="task", chunks=[chunk], memory_budget=10)
     rendered = result.views[0].rendered
     assert result.views[0].level is AttentionLevel.LONG
     assert len(rendered) < len(chunk.content)
@@ -66,6 +67,25 @@ async def test_scoring_is_batched(store: ChunkStore) -> None:
     assert len(provider.calls) == 3  # type: ignore[attr-defined]
     for _state, questions in provider.calls:  # type: ignore[attr-defined]
         assert len(questions) <= 2
+
+
+async def test_small_pool_skips_scoring_and_includes_everything(store: ChunkStore) -> None:
+    add_chunks(store, 5)
+    judge = make_judge(default_score=0.0)
+    result = await attention(judge, small_pool=8).rank(task="task", chunks=store.all())
+    assert judge.provider.calls == []  # type: ignore[attr-defined]
+    assert all(view.level is AttentionLevel.FULL for view in result.views)
+    assert all("small_pool" in view.reason for view in result.views)
+    assert result.hidden == []
+
+
+async def test_small_pool_threshold_is_inclusive(store: ChunkStore) -> None:
+    add_chunks(store, 3)
+    judge = make_judge(default_score=0.0)
+    await attention(judge, small_pool=3).rank(task="task", chunks=store.all())
+    assert judge.provider.calls == []  # type: ignore[attr-defined]
+    await attention(judge, small_pool=2).rank(task="task", chunks=store.all())
+    assert len(judge.provider.calls) == 1  # type: ignore[attr-defined]
 
 
 async def test_all_items_use_one_shared_scale(store: ChunkStore) -> None:

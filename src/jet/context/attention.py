@@ -14,7 +14,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from jet.context.summarizer import Summarizer
+from jet.core.text import estimate_tokens
 from jet.core.types import AttentionLevel, Chunk, ChunkKind
+from jet.errors import JetError
 from jet.providers.judge import Judge
 
 #: Ordered levels. Index doubles as the score scale, so scores are comparable.
@@ -47,6 +49,7 @@ class AttentionResult:
     views: list[AttentionView]
     hidden: list[Chunk] = field(default_factory=list)
     scores: dict[str, float] = field(default_factory=dict)
+    degraded: str | None = None
 
 
 class MetaAttention:
@@ -62,6 +65,7 @@ class MetaAttention:
         char_limit: int = 6000,
         short_tokens: int = 60,
         long_tokens: int = 320,
+        small_pool: int = 8,
     ):
         self.judge = judge
         self.batch_size = batch_size
@@ -72,11 +76,29 @@ class MetaAttention:
         self.char_limit = char_limit
         self.short_tokens = short_tokens
         self.long_tokens = long_tokens
+        self.small_pool = small_pool
+        self._degraded: str | None = None
 
-    async def rank(self, *, task: str, chunks: Sequence[Chunk]) -> AttentionResult:
-        """Score every candidate chunk and resolve each to a level with rendered text."""
+    async def rank(
+        self, *, task: str, chunks: Sequence[Chunk], memory_budget: int | None = None
+    ) -> AttentionResult:
+        """Score candidates and resolve each to a level with rendered text.
+
+        Two fast paths avoid judgment calls that cost more than they save:
+
+        * ``small_pool`` — with only a handful of candidates, including all of
+          them in full is cheaper (in latency and tokens) than a scoring round
+          trip.
+        * ``memory_budget`` — when every candidate fits uncompressed, no
+          summarization happens at all; compression is a budget necessity, not
+          a habit.
+        """
         scorable = [c for c in chunks if c.kind not in NON_SCORABLE_KINDS]
-        scores = await self._score(task, scorable) if scorable else {}
+        small_pool = 0 < len(scorable) <= self.small_pool
+        if not scorable or small_pool:
+            scores = {c.id: 3.0 for c in scorable}
+        else:
+            scores = await self._score(task, scorable)
 
         resolved: list[tuple[Chunk, AttentionLevel, float]] = []
         views: list[AttentionView] = []
@@ -100,7 +122,29 @@ class MetaAttention:
                 continue
             resolved.append((chunk, level, score))
 
-        # Compress everything that needs shrinking, one batched call per level.
+        # Budget check: if every surviving candidate fits in full, keep it in
+        # full — better quality than a summary, and one LLM call cheaper.
+        resolved.sort(key=lambda triple: triple[0].seq)
+        full_cost = sum(estimate_tokens(chunk.content) + 8 for chunk, _, _ in resolved) + sum(
+            estimate_tokens(chunk.content) + 8 for chunk in [v.chunk for v in views]
+        )
+        fits_fully = memory_budget is None or full_cost <= memory_budget
+        degraded = self._degraded
+        self._degraded = None
+        if fits_fully:
+            for chunk, _, score in resolved:
+                views.append(
+                    AttentionView(
+                        chunk=chunk,
+                        level=AttentionLevel.FULL,
+                        score=score,
+                        rendered=chunk.content,
+                        reason="small_pool" if small_pool else f"score={score:.2f} (budget fits)",
+                    )
+                )
+            return AttentionResult(views=views, hidden=hidden, scores=scores, degraded=degraded)
+
+        # Over budget: compress what needs shrinking, one batched call per level.
         rendered_by_id: dict[str, str] = {}
         by_level: dict[AttentionLevel, dict[str, str]] = {}
         for chunk, level, _ in resolved:
@@ -127,7 +171,7 @@ class MetaAttention:
                     chunk=chunk, level=level, score=score, rendered=rendered, reason=f"score={score:.2f}"
                 )
             )
-        return AttentionResult(views=views, hidden=hidden, scores=scores)
+        return AttentionResult(views=views, hidden=hidden, scores=scores, degraded=degraded)
 
     def _level(self, score: float) -> AttentionLevel:
         if score >= self.full_threshold:
@@ -140,25 +184,31 @@ class MetaAttention:
 
     async def _score(self, task: str, chunks: Sequence[Chunk]) -> dict[str, float]:
         scores: dict[str, float] = {}
-        for start in range(0, len(chunks), self.batch_size):
-            batch = chunks[start : start + self.batch_size]
-            items: dict[str, dict[str, Any]] = {
-                chunk.id: {
-                    "kind": chunk.kind.value,
-                    "source": chunk.source,
-                    "content": _clip(chunk.content, self.char_limit),
+        try:
+            for start in range(0, len(chunks), self.batch_size):
+                batch = chunks[start : start + self.batch_size]
+                items: dict[str, dict[str, Any]] = {
+                    chunk.id: {
+                        "kind": chunk.kind.value,
+                        "source": chunk.source,
+                        "content": _clip(chunk.content, self.char_limit),
+                    }
+                    for chunk in batch
                 }
-                for chunk in batch
-            }
-            scores.update(
-                await self.judge.score_many(
-                    state={"task": task},
-                    items=items,
-                    levels=ATTENTION_LEVELS,
-                    instruction=ATTENTION_INSTRUCTION,
-                    purpose="meta_attention",
+                scores.update(
+                    await self.judge.score_many(
+                        state={"task": task},
+                        items=items,
+                        levels=ATTENTION_LEVELS,
+                        instruction=ATTENTION_INSTRUCTION,
+                        purpose="meta_attention",
+                    )
                 )
-            )
+        except JetError as exc:
+            # Judgment outage must not kill the turn: include everything in full
+            # (costlier context, honest reason) and keep going.
+            self._degraded = str(exc)[:200]
+            scores = {chunk.id: 3.0 for chunk in chunks}
         return scores
 
 

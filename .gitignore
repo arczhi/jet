@@ -10,7 +10,12 @@ dist/
 build/
 *.egg-info/
 .env
+.env.backup*
+.env.sim-hidden
 .jet/
 *.db
 *.db-wal
 *.db-shm
+reports/
+*.mov
+.DS_Store

@@ -28,12 +28,14 @@ from jet.tracing import Trace
 
 @pytest.fixture(autouse=True)
 def isolated_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Never read the developer's ~/.config/jet/config.toml, .env, or JET_* vars."""
+    """Never read the developer's real jet config, .env, JET_* vars or credentials."""
     monkeypatch.setattr("jet.config.USER_CONFIG_PATH", tmp_path / "no-user-config.toml")
     monkeypatch.setenv("JET_CONFIG", str(tmp_path / "no-project-config.toml"))
+    monkeypatch.setenv("JET_HOME", str(tmp_path / "jet-home"))
     for key in list(os.environ):
         if key.startswith("JET_"):
             monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("JET_HOME", str(tmp_path / "jet-home"))
     monkeypatch.chdir(tmp_path)
 
 

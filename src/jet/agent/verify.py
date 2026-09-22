@@ -11,11 +11,13 @@ crash the turn and never silently pass.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from typing import Literal
 
 from jet.core.types import Message, Verification
-from jet.errors import ProviderError
+from jet.errors import JetError, ProviderError
 from jet.providers.base import LLMProvider
 from jet.providers.judge import Judge
 from jet.tracing import Trace
@@ -51,13 +53,16 @@ class Verifier:
         self.threshold = threshold
         self.trace = trace
 
-    async def verify(self, *, goal: str, answer: str, evidence: str) -> Verification:
-        if self.mode == "judge":
+    async def verify(self, *, goal: str, answer: str, evidence: str, mode: str | None = None) -> Verification:
+        effective = mode or self.mode
+        if effective == "judge":
             return await self._judge(goal, answer, evidence)
-        if self.mode == "llm":
+        if effective == "llm":
             return await self._llm(goal, answer, evidence)
-        judge_result = await self._judge(goal, answer, evidence)
-        llm_result = await self._llm(goal, answer, evidence)
+        judge_result, llm_result = await asyncio.gather(
+            self._judge(goal, answer, evidence),
+            self._llm(goal, answer, evidence),
+        )
         if not llm_result.conclusive:
             # An inconclusive cross-check must not fail the turn and force a retry
             # loop; the judgment verdict stands, with the degradation recorded.
@@ -89,12 +94,23 @@ class Verifier:
                 reason="no judgment model configured for verification",
                 verifier="judge",
             )
-        probability = await self.judge.noul(
-            {"goal": goal, "answer": answer, "evidence": evidence},
-            SATISFIED_INSTRUCTION,
-            criteria=SATISFIED_CRITERIA,
-            purpose="verification_judge",
-        )
+        try:
+            probability = await self.judge.noul(
+                {"goal": goal, "answer": answer, "evidence": evidence},
+                SATISFIED_INSTRUCTION,
+                criteria=SATISFIED_CRITERIA,
+                purpose="verification_judge",
+            )
+        except JetError as exc:
+            # Judge outage: report an inconclusive verdict — the caller decides
+            # how to degrade without spinning.
+            return Verification(
+                satisfied=False,
+                confidence=0.0,
+                reason=f"judgment verifier unavailable ({str(exc)[:120]})",
+                verifier="judge",
+                conclusive=False,
+            )
         return Verification(
             satisfied=probability >= self.threshold,
             confidence=probability,
@@ -115,6 +131,7 @@ class Verifier:
             Message.system(LLM_SYSTEM),
             Message.user(json.dumps(payload, ensure_ascii=False)),
         ]
+        started = time.monotonic()
         try:
             response = await self.llm.complete(messages, temperature=0.0, max_tokens=2048)
         except ProviderError as exc:
@@ -159,6 +176,7 @@ class Verifier:
                 confidence=confidence,
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
+                duration_ms=int((time.monotonic() - started) * 1000),
             )
         return Verification(
             satisfied=satisfied,

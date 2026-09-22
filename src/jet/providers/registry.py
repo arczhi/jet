@@ -82,6 +82,7 @@ def build_judgment_provider(settings: Settings, session_id: str | None = None) -
             api_key=settings.typesafe_api_key,
             model=settings.typesafe_model,
             timeout_s=settings.provider_timeout_s,
+            idle_timeout_s=settings.provider_idle_timeout_s,
             max_retries=settings.provider_max_retries,
             extra_headers=headers,
         )
@@ -92,6 +93,7 @@ def build_judgment_provider(settings: Settings, session_id: str | None = None) -
             model=settings.judge_openai_model,
             json_mode=settings.judge_openai_json_mode,
             timeout_s=settings.provider_timeout_s,
+            idle_timeout_s=settings.provider_idle_timeout_s,
             max_retries=settings.provider_max_retries,
             extra_headers=headers,
         )
@@ -121,6 +123,7 @@ def build_llm_provider(
         max_tokens=profile.max_tokens,
         include_usage=profile.include_usage,
         timeout_s=settings.provider_timeout_s,
+        idle_timeout_s=settings.provider_idle_timeout_s,
         max_retries=settings.provider_max_retries,
         extra_headers=headers,
         input_price=profile.input_price,

@@ -16,6 +16,7 @@ for non-secret settings. ``jet doctor`` prints this config with secrets redacted
 
 from __future__ import annotations
 
+import json
 import os
 import tomllib
 from pathlib import Path
@@ -44,6 +45,31 @@ def _discover_config_files() -> list[Path]:
     return files
 
 
+def credentials_path() -> Path:
+    home = os.environ.get("JET_HOME", "~/.jet")
+    return Path(home).expanduser() / "credentials.json"
+
+
+def load_credentials() -> dict[str, Any]:
+    path = credentials_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_credentials(data: dict[str, Any]) -> None:
+    """Persist first-run credentials (0600, outside any repository)."""
+    import json as _json
+
+    path = credentials_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    path.write_text(payload, encoding="utf-8")
+    path.chmod(0o600)
+
+
 def load_toml_config(paths: list[Path] | None = None) -> dict[str, Any]:
     """Merge TOML files in order; later files win. Missing files are skipped."""
     merged: dict[str, Any] = {}
@@ -70,19 +96,43 @@ class _TomlSource(PydanticBaseSettingsSource):
         return self._data
 
 
+class _CredentialsSource(PydanticBaseSettingsSource):
+    """Lowest-priority layer: the first-run setup dialog's saved keys."""
+
+    def __init__(self, settings_cls: type[BaseSettings], data: dict[str, Any]):
+        super().__init__(settings_cls)
+        self._data = data
+
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        known = {"typesafe_api_key", "llm_profiles", "llm_profile", "judge_provider"}
+        values = {key: value for key, value in self._data.items() if key in known}
+        # Aliased fields validate by alias, not field name: submit the alias key
+        # too, or pydantic silently drops the value (the reappearing setup bug).
+        if "typesafe_api_key" in values:
+            values["TYPESAFE_API_KEY"] = values["typesafe_api_key"]
+        return values
+
+
 class LLMProfile(BaseModel):
     """One generation/verification endpoint.
 
     Named profiles are the plugin seam for LLMs: point jet at OpenCode Go, the
     official DeepSeek API, a local vLLM server, or anything OpenAI-compatible by
     adding a profile and selecting it with ``JET_LLM_PROFILE``.
+
+    ``max_tokens`` bounds one completion. A finite default matters: without it
+    a degenerate generation can stream for minutes (the read timeout never
+    fires while bytes keep arriving).
     """
 
     base_url: str | None = None
     api_key: str | None = None
     model: str = "deepseek-flash"
     temperature: float = 0.0
-    max_tokens: int | None = None
+    max_tokens: int = Field(default=65_536, ge=256)
     include_usage: bool = True
     extra_headers: dict[str, str] = Field(default_factory=dict)
     input_price: float = 0.0
@@ -116,6 +166,7 @@ class Settings(BaseSettings):
     judge_extra_headers: dict[str, str] = Field(default_factory=dict)
     provider_timeout_s: float = Field(default=120.0, gt=0)
     provider_max_retries: int = Field(default=2, ge=0)
+    provider_idle_timeout_s: float = Field(default=90.0, gt=0)
 
     # generation + verification LLMs (named profiles; see LLMProfile)
     llm_profile: str = "default"
@@ -127,8 +178,11 @@ class Settings(BaseSettings):
     home: Path = Path("~/.jet")
     workspace: Path = Path(".")
     max_steps: int = 24
+    conclude_after_steps: int = Field(default=6, ge=1)
+    max_verification_failures: int = Field(default=3, ge=1)
     context_budget_tokens: int = Field(default=24_000, ge=1_000)
     attention_batch_size: int = Field(default=24, ge=1)
+    attention_small_pool: int = Field(default=8, ge=0)
     attention_full_threshold: float = Field(default=2.5, ge=0.0)
     attention_long_threshold: float = Field(default=1.5, ge=0.0)
     attention_short_threshold: float = Field(default=0.4, ge=0.0)
@@ -137,7 +191,7 @@ class Settings(BaseSettings):
     permission_judge: bool = True
     permission_rules: list[dict[str, Any]] = Field(default_factory=list)
     verifier_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
-    decompose_max_depth: int = Field(default=2, ge=0)
+    decompose_max_depth: int = Field(default=1, ge=0)
     decompose_max_subgoals: int = Field(default=16, ge=1)
     trace_enabled: bool = True
 
@@ -165,6 +219,7 @@ class Settings(BaseSettings):
             env_settings,
             dotenv_settings,
             _TomlSource(settings_cls, load_toml_config()),
+            _CredentialsSource(settings_cls, load_credentials()),
             file_secret_settings,
         )
 

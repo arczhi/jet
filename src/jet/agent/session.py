@@ -111,6 +111,7 @@ def create_agent(
         long_threshold=settings.attention_long_threshold,
         short_threshold=settings.attention_short_threshold,
         summarizer=resolved_summarizer,
+        small_pool=settings.attention_small_pool,
     )
     builder = ContextBuilder(attention, budget_tokens=settings.context_budget_tokens)
     memory = MemoryLoader(settings.workspace, store)

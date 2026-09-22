@@ -171,7 +171,42 @@ async def test_malformed_tool_arguments_raise() -> None:
         )
 
     llm = make_llm(handler)
-    with pytest.raises(ProviderBadResponseError, match="invalid JSON"):
+    with pytest.raises(ProviderBadResponseError, match="truncated JSON"):
+        await llm.complete([Message.user("go")])
+    await llm.aclose()
+
+
+async def test_truncated_tool_call_mentions_max_tokens() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=sse(
+                [
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "c",
+                                            "function": {
+                                                "name": "write_file",
+                                                "arguments": '{"path": "a.txt", "cont',
+                                            },
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                    {"choices": [{"delta": {}, "finish_reason": "length"}]},
+                ]
+            ),
+        )
+
+    llm = make_llm(handler)
+    with pytest.raises(ProviderBadResponseError, match="raise max_tokens"):
         await llm.complete([Message.user("go")])
     await llm.aclose()
 

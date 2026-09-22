@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from jet.core.types import ToolSpec
+from jet.errors import JetError
 from jet.providers.judge import Judge
 from jet.tools.registry import ToolRegistry
 from jet.tracing import Trace
@@ -58,13 +59,19 @@ class ToolSelector:
             }
             for spec in specs
         }
-        scores = await self.judge.score_many(
-            state={"task": task, "context": context},
-            items=items,
-            levels=RELEVANCE_LEVELS,
-            instruction=RELEVANCE_INSTRUCTION,
-            purpose="tool_selection",
-        )
+        try:
+            scores = await self.judge.score_many(
+                state={"task": task, "context": context},
+                items=items,
+                levels=RELEVANCE_LEVELS,
+                instruction=RELEVANCE_INSTRUCTION,
+                purpose="tool_selection",
+            )
+        except JetError as exc:
+            # Judge outage: send every schema rather than blind the model.
+            if self.trace is not None:
+                self.trace.event("tools.selected.degraded", reason=str(exc)[:200])
+            return specs
         ranked = sorted(scores.items(), key=lambda pair: pair[1], reverse=True)
         selected: list[str] = [name for name, score in ranked if score >= self.threshold][: self.top_k]
         for name in self.always_include:

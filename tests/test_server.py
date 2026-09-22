@@ -19,7 +19,7 @@ import httpx
 
 from jet.agent.loop import Agent
 from jet.agent.session import create_agent
-from jet.config import Settings
+from jet.config import Settings, load_settings
 from jet.context.summarizer import TruncatingSummarizer
 from jet.core.types import ToolCall
 from jet.providers.mock import MockTurn
@@ -46,7 +46,7 @@ def build(settings: Settings, *, llm: Any = None, judge: Any = None) -> TurnMana
             ),
         )
 
-    return TurnManager(factory, settings)
+    return TurnManager(lambda _settings: factory, settings)
 
 
 async def collect(
@@ -236,6 +236,100 @@ async def test_new_session_replaces_state(settings: Settings) -> None:
     await manager.shutdown()
 
 
+async def test_workspace_switch_updates_engine_and_persists(settings: Settings) -> None:
+    manager = build(settings)
+    await manager.startup()
+    app = create_app(manager)
+    other_dir = settings.workspace.parent / "other-ws"
+    other_dir.mkdir()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://jet.test") as http:
+        before = (await http.get("/api/state")).json()
+        response = await http.post("/api/workspace", json={"path": str(other_dir)})
+        assert response.status_code == 200
+        after = response.json()
+        assert after["workspace"] == str(other_dir)
+        assert after["session_id"] != before["session_id"]
+    from jet.state import read_state
+
+    assert read_state(settings.home)["last_workspace"] == str(other_dir)
+    await manager.shutdown()
+
+
+async def test_workspace_switch_rejects_non_directories(settings: Settings) -> None:
+    manager = build(settings)
+    await manager.startup()
+    app = create_app(manager)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://jet.test") as http:
+        response = await http.post("/api/workspace", json={"path": "no/such/dir"})
+        assert response.status_code == 422
+        file_path = settings.workspace / "file.txt"
+        file_path.write_text("x")
+        response = await http.post("/api/workspace", json={"path": str(file_path)})
+        assert response.status_code == 422
+    await manager.shutdown()
+
+
+async def test_workspace_switch_while_busy_is_rejected(settings: Settings) -> None:
+    manager = build(settings, llm=make_llm(MockTurn(text="slow", delay_s=0.3), MockTurn(text="x")))
+    await manager.startup()
+    app = create_app(manager)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://jet.test") as http:
+        await http.post("/api/turns", json={"task": "busy"})
+        response = await http.post("/api/workspace", json={"path": str(settings.workspace)})
+        assert response.status_code == 409
+        await wait_for(manager, lambda event: event["type"] == "turn_finished")
+    await manager.shutdown()
+
+
+async def test_lang_persists_and_surfaces_in_state(settings: Settings) -> None:
+    manager = build(settings)
+    await manager.startup()
+    app = create_app(manager)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://jet.test") as http:
+        assert (await http.get("/api/state")).json()["lang"] == "en"
+        response = await http.post("/api/lang", json={"lang": "zh"})
+        assert response.json() == {"lang": "zh"}
+        assert (await http.get("/api/state")).json()["lang"] == "zh"
+        assert (await http.post("/api/lang", json={"lang": "fr"})).status_code == 422
+    from jet.state import read_state
+
+    assert read_state(settings.home)["lang"] == "zh"
+    await manager.shutdown()
+
+
+async def test_theme_persists_and_surfaces_in_state(settings: Settings) -> None:
+    manager = build(settings)
+    await manager.startup()
+    app = create_app(manager)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://jet.test") as http:
+        state = (await http.get("/api/state")).json()
+        assert state["theme"] == "light"
+        response = await http.post("/api/theme", json={"theme": "dark"})
+        assert response.json() == {"theme": "dark"}
+        assert (await http.get("/api/state")).json()["theme"] == "dark"
+        assert (await http.post("/api/theme", json={"theme": "midnight"})).status_code == 422
+    from jet.state import read_state
+
+    assert read_state(settings.home)["theme"] == "dark"
+    await manager.shutdown()
+
+
+async def test_fs_list_returns_directories(settings: Settings) -> None:
+    manager = build(settings)
+    await manager.startup()
+    app = create_app(manager)
+    nested = settings.workspace / "sub"
+    nested.mkdir()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://jet.test") as http:
+        payload = (await http.get("/api/fs/list", params={"path": str(settings.workspace)})).json()
+        names = [entry["name"] for entry in payload["entries"]]
+        assert "sub" in names
+        assert all(entry["path"] for entry in payload["entries"])
+        assert payload["parent"] is not None and payload["home"]
+        assert (await http.get("/api/fs/list", params={"path": "/no/such/dir"})).status_code == 404
+    await manager.shutdown()
+
+
 async def test_buffered_events_replay_to_late_subscribers(settings: Settings) -> None:
     manager = build(settings, llm=make_llm("done"))
     await manager.startup()
@@ -245,3 +339,23 @@ async def test_buffered_events_replay_to_late_subscribers(settings: Settings) ->
     assert replay[0]["type"] == "turn_started"
     assert any(event["type"] == "turn_finished" for event in replay)
     await manager.shutdown()
+
+
+async def test_startup_workspace_restores_last_directory(tmp_path: Path) -> None:
+    from jet.desktop import resolve_startup_workspace
+    from jet.state import update_state
+
+    home = tmp_path / "home"
+    last_dir = tmp_path / "last"
+    last_dir.mkdir()
+    update_state(home, last_workspace=str(last_dir))
+    settings = load_settings(workspace=tmp_path / "fresh", home=home)
+    resolved = resolve_startup_workspace(settings, explicit=False)
+    assert resolved.workspace == last_dir.resolve()
+    # An explicit choice always wins over memory.
+    kept = resolve_startup_workspace(settings, explicit=True)
+    assert kept.workspace == (tmp_path / "fresh").resolve()
+    # A stale remembered directory is ignored, not fatal.
+    update_state(home, last_workspace="/no/such/dir")
+    fallback = resolve_startup_workspace(settings, explicit=False)
+    assert fallback.workspace == (tmp_path / "fresh").resolve()

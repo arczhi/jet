@@ -20,6 +20,7 @@ from jet.core.types import (
     StreamEvent,
     TextDelta,
     ToolCall,
+    ToolCallProgress,
     ToolCallsReady,
     ToolSpec,
     Usage,
@@ -27,6 +28,10 @@ from jet.core.types import (
 from jet.errors import ProviderBadResponseError
 from jet.providers.base import BaseLLMProvider
 from jet.providers.http import HttpClient, HttpTransport
+
+#: Emit one ToolCallProgress roughly per this many streamed argument chars,
+#: so a long file write shows live progress instead of a silent caret.
+TOOL_PROGRESS_EVERY_CHARS = 1200
 
 
 def to_openai_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
@@ -89,6 +94,7 @@ class OpenAICompatibleLLM(BaseLLMProvider):
         include_usage: bool = True,
         timeout_s: float = 120.0,
         max_retries: int = 2,
+        idle_timeout_s: float = 90.0,
         name: str = "openai_compat",
         http_client: HttpClient | None = None,
         extra_headers: Mapping[str, str] | None = None,
@@ -107,6 +113,7 @@ class OpenAICompatibleLLM(BaseLLMProvider):
             api_key=api_key,
             timeout_s=timeout_s,
             max_retries=max_retries,
+            idle_timeout_s=idle_timeout_s,
             provider=name,
             client=http_client,
             extra_headers=extra_headers,
@@ -143,6 +150,7 @@ class OpenAICompatibleLLM(BaseLLMProvider):
         usage = Usage()
         finish_reason: str | None = None
         call_buffers: dict[int, dict[str, Any]] = {}
+        progress_emitted: dict[int, int] = {}
 
         async for chunk in self._transport.stream_sse("/chat/completions", payload):
             raw_usage = chunk.get("usage")
@@ -164,9 +172,17 @@ class OpenAICompatibleLLM(BaseLLMProvider):
                     reasoning_parts.append(reasoning)
                     yield ReasoningDelta(reasoning)
                 for tool_delta in delta.get("tool_calls") or []:
-                    self._accumulate_tool_call(call_buffers, tool_delta)
+                    name = self._accumulate_tool_call(call_buffers, tool_delta)
+                    if name:
+                        args_len = len(call_buffers[int(tool_delta.get("index", 0))]["arguments"])
+                        emitted = progress_emitted.get(int(tool_delta.get("index", 0)), 0)
+                        if args_len - emitted >= TOOL_PROGRESS_EVERY_CHARS:
+                            progress_emitted[int(tool_delta.get("index", 0))] = args_len
+                            yield ToolCallProgress(
+                                index=int(tool_delta.get("index", 0)), name=name, chars=args_len
+                            )
 
-        calls = self._finalize_tool_calls(call_buffers)
+        calls = self._finalize_tool_calls(call_buffers, finish_reason)
         if calls:
             yield ToolCallsReady(calls)
         response = LLMResponse(
@@ -180,7 +196,8 @@ class OpenAICompatibleLLM(BaseLLMProvider):
         yield StreamDone(response)
 
     @staticmethod
-    def _accumulate_tool_call(buffers: dict[int, dict[str, Any]], delta: dict[str, Any]) -> None:
+    def _accumulate_tool_call(buffers: dict[int, dict[str, Any]], delta: dict[str, Any]) -> str:
+        """Accumulate one tool-call delta; returns the known name (if any)."""
         index = int(delta.get("index", 0))
         buffer = buffers.setdefault(index, {"id": None, "name": None, "arguments": ""})
         if delta.get("id"):
@@ -190,9 +207,10 @@ class OpenAICompatibleLLM(BaseLLMProvider):
             buffer["name"] = function["name"]
         if function.get("arguments"):
             buffer["arguments"] += function["arguments"]
+        return buffer["name"] or ""
 
     @staticmethod
-    def _finalize_tool_calls(buffers: dict[int, dict[str, Any]]) -> list[ToolCall]:
+    def _finalize_tool_calls(buffers: dict[int, dict[str, Any]], finish_reason: str | None) -> list[ToolCall]:
         calls: list[ToolCall] = []
         for index in sorted(buffers):
             buffer = buffers[index]
@@ -204,8 +222,14 @@ class OpenAICompatibleLLM(BaseLLMProvider):
                 try:
                     arguments = json.loads(raw_arguments)
                 except ValueError as exc:
+                    hint = (
+                        " — the completion hit max_tokens before the tool call finished; "
+                        "raise max_tokens on this profile"
+                        if finish_reason == "length"
+                        else ""
+                    )
                     raise ProviderBadResponseError(
-                        f"tool call {name} has invalid JSON arguments: {raw_arguments[:200]}"
+                        f"tool call {name} has truncated JSON arguments{hint}"
                     ) from exc
                 if not isinstance(arguments, dict):
                     raise ProviderBadResponseError(f"tool call {name} arguments must be a JSON object")

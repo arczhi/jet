@@ -36,6 +36,8 @@ class ContextPlan:
     views: list[AttentionView]
     hidden: list[Chunk]
     tokens: int
+    verbatim_messages: int = 0
+    verbatim_tokens: int = 0
     counts: dict[str, int] = field(default_factory=dict)
 
 
@@ -65,8 +67,9 @@ class ContextBuilder:
         blocks = _message_blocks(verbatim)
         kept, dropped = _pack_from_end(blocks, available)
         verbatim_tokens = sum(estimate_tokens(message.content) for message in kept)
+        memory_budget = max(available - verbatim_tokens, 0)
 
-        result = await self.attention.rank(task=task, chunks=chunks)
+        result = await self.attention.rank(task=task, chunks=chunks, memory_budget=memory_budget)
         selected: list[AttentionView] = []
         used = 0
         ordered = sorted(result.views, key=lambda view: (VIEW_ORDER[view.level], view.chunk.seq))
@@ -90,6 +93,8 @@ class ContextBuilder:
             views=selected,
             hidden=result.hidden,
             tokens=system_tokens + estimate_tokens(memory) + verbatim_tokens,
+            verbatim_messages=len(kept),
+            verbatim_tokens=verbatim_tokens,
             counts={**summarize_views(selected), "hidden": len(result.hidden), "dropped_verbatim": dropped},
         )
 

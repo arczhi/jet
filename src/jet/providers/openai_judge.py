@@ -52,6 +52,7 @@ class OpenAICompatibleJudge:
         json_mode: bool = True,
         timeout_s: float = 120.0,
         max_retries: int = 2,
+        idle_timeout_s: float = 90.0,
         http_client: HttpClient | None = None,
         extra_headers: Mapping[str, str] | None = None,
     ):
@@ -62,6 +63,7 @@ class OpenAICompatibleJudge:
             api_key=api_key,
             timeout_s=timeout_s,
             max_retries=max_retries,
+            idle_timeout_s=idle_timeout_s,
             provider="judge_openai",
             client=http_client,
             extra_headers=extra_headers,

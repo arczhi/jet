@@ -24,6 +24,9 @@ ci: lint typecheck test
 smoke:
 	$(PY) python scripts/smoke.py
 
+demo:
+	chmod +x scripts/record-demo.sh && ./scripts/record-demo.sh
+
 run:
 	$(PY) jet
 
