@@ -16,9 +16,10 @@
 </p>
 
 > Demo run (recording above): **done in 76s** — 12 steps · 10 tool calls ·
-> 177k tokens · cross-model verified. jet built an offline WebAudio music
-> player end-to-end: streamed answer with live thinking, tool calls with
-> real-time write progress, then `open index.html` in the browser.
+> 177k tokens (156k input + 21k output) · cross-model verified. jet built an
+> offline WebAudio music player end-to-end: streamed answer with live thinking,
+> tool calls with real-time write progress, then `open index.html` in the
+> browser.
 
 License: **CC BY-NC 4.0** — free to share and adapt with attribution; commercial
 use is not permitted. See [LICENSE](LICENSE). Author: **alex (arczhi)**.
