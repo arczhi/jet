@@ -21,13 +21,20 @@
 > tool calls with real-time write progress, then `open index.html` in the
 > browser.
 
+📖 **[How jet works — the ideas behind it](docs/DESIGN.md)** — a plain-language
+walkthrough of the core designs (RLCD context engine, judgment-first routing,
+async plans, verification gates), with credits to the
+[original write-up](https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/edit?tab=t.0)
+that inspired them.
+
 License: **CC BY-NC 4.0** — free to share and adapt with attribution; commercial
 use is not permitted. See [LICENSE](LICENSE). Author: **alex (arczhi)**.
 
 ## Why it is fast
 
 Most agent latency is spent feeding a huge transcript to one big model. jet
-flips that: **state is explicit, decisions are cheap**.
+flips that: **state is explicit, decisions are cheap**. The full story lives in
+[docs/DESIGN.md](docs/DESIGN.md); in brief:
 
 - **RLCD context engine** — everything is a typed chunk in a SQLite tree. No
   compaction: a fast judgment model scores what belongs in the next context
