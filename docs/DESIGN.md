@@ -1,3 +1,5 @@
+> 感谢作者提供的思路：[Thoughts on a TypeSafe coding agent](https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/edit?tab=t.0)。本文将其中值得借鉴的设计思想，结合 jet 当前代码，整理成一份通俗易懂的技术说明。
+
 # How jet works — the ideas behind it
 
 <p align="center">
@@ -14,6 +16,48 @@
 This document explains jet's core and novel designs in plain language. It is
 written for someone who has used coding agents before and wants to understand
 what is different here — no paper-reading required.
+
+> **Reading note.** This document describes the implementation in this
+> repository, not an abstract promise about future features. Names such as
+> RLCD and judge are shorthand for the modules listed in the final section.
+
+> Prefer a visual walkthrough? Open the [interactive HTML guide](design.html).
+
+## What problem is jet solving?
+
+A conventional coding agent usually puts the entire conversation into the next
+LLM request. That approach is easy to implement, but three costs grow together:
+
+1. old, irrelevant conversation consumes input tokens;
+2. every tool schema is sent even when the tool will not be used;
+3. the same model is asked to plan, choose tools, execute code, and judge its
+   own result.
+
+jet separates these jobs. The expensive model remains responsible for useful
+code and explanations, while a cheap structured-judgment model answers the
+many small questions around it. The application, not either model, owns the
+budget, permissions, recursion limits, duplicate-call detection, and final
+stop conditions.
+
+## The complete lifecycle of one request
+
+```text
+user request
+    │
+    ├─ persist as a chunk and load project memory
+    ├─ start planning in the background
+    │
+    └─ repeat until done or bounded:
+         ├─ rebuild context from stored chunks
+         ├─ select likely tools and inject only their full schemas
+         ├─ stream the worker LLM response
+         ├─ apply policy, ask for approval, and execute tools
+         ├─ persist assistant/tool evidence
+         └─ verify the current answer
+```
+
+The important property is that the next prompt is not simply “the previous
+prompt plus one more turn”. It is a fresh, budgeted view of durable state.
 
 ---
 
@@ -67,6 +111,18 @@ The current turn always travels **verbatim** (the chat protocol requires
 tool-call pairing), and it is never duplicated into memory. Memory = the past,
 verbatim = now.
 
+### Why this is more than ordinary summarization
+
+Summarization replaces old information and can permanently lose a filename,
+error message, or exact tool result. jet keeps the original `Chunk` in SQLite.
+The short note or summary is only a rendering for this one context window.
+If a later step needs the detail, the same chunk can be selected at `full`
+again. A pinned chunk, plan node, subgoal, or memory item is also kept in full.
+
+The builder then packs the newest protocol-safe turns first. An assistant
+tool-call message and its tool results are treated as one block, so trimming
+history cannot create an invalid OpenAI-style message sequence.
+
 ---
 
 ## 2. The judge is a different *kind* of model
@@ -93,6 +149,11 @@ context goes all-full, tool routing sends everything, planning skips, the
 verifier reports "inconclusive" and the answer stands — the trace records the
 degradation.
 
+The judge is therefore an accelerator and a quality signal, not the ultimate
+authority. For example, a judge can rank `run_command` as relevant, but it
+cannot grant permission to run a dangerous command. That distinction keeps
+model uncertainty from becoming an implicit security policy.
+
 ---
 
 ## 3. Plans are async, gated, and never blocking
@@ -112,6 +173,15 @@ genuinely multi-part goal still gets a visible, resumable plan tree — each
 subgoal is a chunk with live status (pending → running → done), shown in the
 client's Plan pane.
 
+Planning also has two less visible safeguards:
+
+- proposed subtasks are deduplicated against existing subgoals;
+- a directly actionable subtask is kept as-is, while a bundled subtask can
+  recurse only within the configured depth and total-node limits.
+
+This makes “recursive” mean bounded recursive decomposition, not an open-ended
+chain of LLM calls.
+
 ---
 
 ## 4. Tools: snippets always, schemas on demand, writes with receipts
@@ -127,6 +197,24 @@ client's Plan pane.
   see a live card (`write_file · writing… 21.7k chars`) instead of a silent
   caret. Repeating an identical call is refused with a pointer to the recorded
   result.
+
+### Permission decision order
+
+For a mutating call, the order is deliberately one-way:
+
+```text
+deterministic rule → optional judge safety check → human approval (ask mode)
+```
+
+Rules can allow, ask, or deny. A deny is final. The judge may tighten an
+uncertain decision, but it cannot turn a denied command into an allowed one.
+In non-interactive mode, an `ask` decision becomes a denial when no approver is
+available. This is a fail-closed boundary rather than a fallback that silently
+changes the user's safety preference.
+
+The built-in rules explicitly cover recursive deletion of root/home paths,
+`sudo`, remote-content piped into a shell, fork bombs, workspace writes, and
+shell execution. Projects can provide additional rules through configuration.
 
 ---
 
@@ -171,6 +259,69 @@ Each session writes one JSONL trace: every judgment (purpose, provider,
 latency, cache hit), every LLM turn (tokens, cost), every tool call, every
 policy verdict. The client's Context/Session panes read from the same
 structures — what you see is what the agent used, token costs included.
+
+The trace is useful for both debugging and product decisions. It can answer:
+
+- which chunks were hidden, summarized, or kept in full;
+- which tool scores caused a schema to be injected;
+- whether a permission result came from a rule, the judge, or a human;
+- how many provider calls were cache hits and what they cost;
+- why the turn stopped: done, budget, max steps, error, or cancellation.
+
+## 8. What is genuinely innovative in this implementation?
+
+The individual ingredients are familiar. The innovation is their combination
+into one control loop with explicit ownership boundaries:
+
+| Design | The usual shortcut | jet's design | Practical benefit |
+| --- | --- | --- | --- |
+| Context | keep or summarize a transcript | durable chunk tree + per-step attention | detail is recoverable and prompts stay small |
+| Model roles | one model does everything | judge routes; worker implements; code enforces | cheaper decisions and clearer failure modes |
+| Planning | block before the first action | gate and plan concurrently | simple tasks do not pay planning latency |
+| Tools | send every full schema | snippets always, schemas on demand | less prompt noise without hiding capabilities |
+| Safety | let the model decide freely | deterministic rules first, judge can tighten | model mistakes do not grant permission |
+| Completion | trust the final prose | verify against recorded evidence | unsupported claims are exposed |
+| Reliability | retry until something passes | bounded retries + explicit inconclusive state | no silent success and no endless loops |
+
+The common theme is **cheap probabilistic advice surrounded by deterministic
+boundaries**. Models are good at ranking and interpretation; code is better at
+limits, state transitions, and security invariants.
+
+## 9. Boundaries and current trade-offs
+
+These choices are intentional and should be understood before deploying jet:
+
+- The judge adds network calls. Caching and batched questions reduce the cost,
+  but a fully local, single-model agent may still have lower absolute latency
+  for tiny tasks.
+- “Everything is retained” means the SQLite session store needs lifecycle and
+  privacy management. Retention, export, and deletion policy are deployment
+  responsibilities.
+- The context score is a relevance estimate, not a proof of correctness. A
+  bad score can hide useful material, so the UI and trace expose the decision.
+- The default safety posture is conservative. Automatic execution is a
+  configured mode, not something inferred from a model's confidence.
+- Verification checks available evidence; it cannot prove that an unseen
+  external system has no side effects.
+
+## 10. Where to find each design in the code
+
+| Concern | Main implementation |
+| --- | --- |
+| durable chunks and parent links | `src/jet/context/store.py`, `src/jet/core/types.py` |
+| attention scoring and levels | `src/jet/context/attention.py` |
+| token-budgeted message assembly | `src/jet/context/builder.py` |
+| bounded recursive planning | `src/jet/context/decompose.py` |
+| per-step agent loop | `src/jet/agent/loop.py` |
+| tool relevance routing | `src/jet/tools/selection.py` |
+| permission and approval policy | `src/jet/policy/permissions.py` |
+| evidence-based verification | `src/jet/agent/verify.py` |
+| provider/cache contracts | `src/jet/providers/`, `src/jet/cache.py` |
+| JSONL audit trail | `src/jet/tracing.py` |
+
+These modules are intentionally separated: replacing a judge provider should
+not require rewriting the policy engine, and changing the UI should not change
+how context is selected.
 
 ---
 

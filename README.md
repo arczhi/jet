@@ -1,3 +1,5 @@
+> 感谢作者提供的思路：[Thoughts on a TypeSafe coding agent](https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/edit?tab=t.0)。jet 在此基础上将“显式状态、轻量判断模型、按需构建上下文”等想法落实成了一个可运行的 coding agent。
+
 <p align="center">
   <img src="docs/logo.svg" alt="jet logo" width="84" />
 </p>
@@ -21,11 +23,9 @@
 > tool calls with real-time write progress, then `open index.html` in the
 > browser.
 
-📖 **[How jet works — the ideas behind it](docs/DESIGN.md)** — a plain-language
+🧭 **[Open the visual design guide](docs/design.html)** · 📖 **[How jet works — the ideas behind it](docs/DESIGN.md)** — a plain-language
 walkthrough of the core designs (RLCD context engine, judgment-first routing,
-async plans, verification gates), with credits to the
-[original write-up](https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/edit?tab=t.0)
-that inspired them.
+async plans, verification gates, policy and observability).
 
 License: **CC BY-NC 4.0** — free to share and adapt with attribution; commercial
 use is not permitted. See [LICENSE](LICENSE). Author: **alex (arczhi)**.

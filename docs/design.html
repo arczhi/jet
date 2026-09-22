@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="jet coding agent 核心设计与创新点的可视化技术说明">
+  <title>jet / 设计说明</title>
+  <style>
+    :root {
+      --ink: #111923;
+      --muted: #627184;
+      --paper: #f4f7fa;
+      --panel: #ffffff;
+      --line: #dbe3eb;
+      --blue: #2277c9;
+      --blue-dark: #0d3c68;
+      --blue-pale: #e7f2fc;
+      --signal: #e6f0e8;
+      --shadow: 0 20px 60px rgba(18, 42, 69, .10);
+      --radius: 18px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; color: var(--ink); background: var(--paper);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.6;
+    }
+    a { color: inherit; }
+    .topline { height: 5px; background: var(--blue); }
+    .shell { width: min(1180px, calc(100% - 40px)); margin: auto; }
+    .credit {
+      padding: 15px max(20px, calc((100vw - 1180px) / 2));
+      background: #edf4f9; color: #38516b; font-size: 13px;
+      border-bottom: 1px solid var(--line);
+    }
+    .credit a { color: var(--blue-dark); font-weight: 700; }
+    nav {
+      height: 72px; display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand { display: flex; align-items: center; gap: 11px; text-decoration: none; font-weight: 800; letter-spacing: -.04em; }
+    .brand img { width: 32px; height: 32px; }
+    .navlinks { display: flex; gap: 22px; color: var(--muted); font-size: 13px; }
+    .navlinks a { text-decoration: none; }
+    .navlinks a:hover, .navlinks a:focus { color: var(--blue); }
+    .hero { padding: 76px 0 90px; display: grid; grid-template-columns: 1.04fr .96fr; gap: 60px; align-items: center; }
+    .kicker { color: var(--blue); font: 700 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .14em; text-transform: uppercase; }
+    h1, h2, h3 { margin: 0; letter-spacing: -.055em; line-height: 1.04; }
+    h1 { margin-top: 18px; max-width: 650px; font-size: clamp(44px, 7vw, 82px); }
+    h1 em { color: var(--blue); font-style: normal; }
+    .lead { max-width: 570px; margin: 25px 0 30px; color: var(--muted); font-size: 19px; }
+    .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+    .button { display: inline-flex; align-items: center; padding: 11px 17px; border-radius: 999px; border: 1px solid var(--line); text-decoration: none; font-size: 14px; font-weight: 700; transition: transform .18s ease, border-color .18s ease; }
+    .button:hover { transform: translateY(-2px); border-color: var(--blue); }
+    .button.primary { color: white; background: var(--blue-dark); border-color: var(--blue-dark); }
+    .hero-diagram { position: relative; min-height: 330px; padding: 26px; border: 1px solid #c7d8e7; background: #eaf3fa; box-shadow: var(--shadow); overflow: hidden; }
+    .hero-diagram::before { content: ""; position: absolute; inset: 0; opacity: .5; background-image: linear-gradient(#c7d8e7 1px, transparent 1px), linear-gradient(90deg, #c7d8e7 1px, transparent 1px); background-size: 28px 28px; }
+    .orbit { position: absolute; inset: 34px; border: 1px solid #a9c7df; border-radius: 50%; transform: rotate(-12deg); }
+    .orbit.two { inset: 72px 30px; transform: rotate(22deg); }
+    .node { position: absolute; z-index: 1; display: grid; gap: 4px; min-width: 126px; padding: 13px 14px; background: white; border: 1px solid #bdd2e3; box-shadow: 0 8px 22px rgba(28, 75, 117, .12); }
+    .node strong { font-size: 14px; }
+    .node small { color: var(--muted); font-size: 11px; }
+    .node.judge { top: 25px; right: 25px; }
+    .node.worker { left: 28px; bottom: 30px; }
+    .node.code { right: 46px; bottom: 54px; background: var(--blue-dark); color: white; border-color: var(--blue-dark); }
+    .node.code small { color: #c5dcf1; }
+    .section { padding: 92px 0; border-top: 1px solid var(--line); }
+    .section-head { max-width: 690px; margin-bottom: 38px; }
+    h2 { font-size: clamp(32px, 5vw, 56px); }
+    .section-head p { color: var(--muted); font-size: 17px; margin: 18px 0 0; }
+    .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+    .flow-step { min-height: 190px; position: relative; padding: 19px; background: var(--panel); border: 1px solid var(--line); }
+    .flow-step:not(:last-child)::after { content: "→"; position: absolute; z-index: 2; top: 68px; right: -17px; color: var(--blue); font-size: 24px; }
+    .number { color: var(--blue); font: 700 12px ui-monospace, monospace; }
+    .flow-step h3 { margin-top: 24px; font-size: 20px; }
+    .flow-step p { color: var(--muted); font-size: 13px; }
+    .split { display: grid; grid-template-columns: .9fr 1.1fr; gap: 18px; align-items: start; }
+    .panel { background: var(--panel); border: 1px solid var(--line); padding: 27px; border-radius: var(--radius); }
+    .panel h3 { font-size: 26px; margin-bottom: 13px; }
+    .panel p { color: var(--muted); margin-top: 0; }
+    .chunk-tree { display: grid; gap: 10px; margin-top: 24px; }
+    .chunk { display: grid; grid-template-columns: 80px 1fr auto; gap: 12px; align-items: center; padding: 12px; border: 1px solid var(--line); background: #fbfcfd; font-size: 13px; }
+    .chunk b { color: var(--blue-dark); font: 700 11px ui-monospace, monospace; }
+    .chunk span { color: var(--muted); }
+    .chunk i { width: 11px; height: 11px; border-radius: 50%; background: var(--blue); }
+    .chunk:nth-child(2) { margin-left: 28px; } .chunk:nth-child(3) { margin-left: 56px; }
+    .levels { display: grid; gap: 10px; }
+    .level { display: grid; grid-template-columns: 104px 1fr; gap: 15px; align-items: center; padding: 16px; border-left: 4px solid var(--blue); background: #f6fafd; }
+    .level strong { font-size: 14px; } .level span { color: var(--muted); font-size: 13px; }
+    .level:nth-child(1) { border-color: #b8c5cf; } .level:nth-child(2) { border-color: #8cb6d7; } .level:nth-child(3) { border-color: #4c97d0; } .level:nth-child(4) { border-color: var(--blue-dark); }
+    .roles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .role { padding: 23px; min-height: 184px; border-top: 4px solid var(--blue); background: var(--panel); border: 1px solid var(--line); }
+    .role h3 { font-size: 24px; margin: 14px 0 8px; }
+    .role p { color: var(--muted); font-size: 14px; margin: 0; }
+    .role code, code { color: var(--blue-dark); font: 700 12px ui-monospace, monospace; }
+    .policy { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border: 1px solid var(--line); background: var(--panel); }
+    .policy-step { padding: 25px; min-height: 160px; border-right: 1px solid var(--line); }
+    .policy-step:last-child { border-right: 0; }
+    .policy-step strong { display: block; color: var(--blue-dark); font-size: 17px; }
+    .policy-step span { display: block; margin-top: 13px; color: var(--muted); font-size: 13px; }
+    .policy-step::after { content: "→"; float: right; color: var(--blue); font-size: 24px; }
+    .policy-step:last-child::after { content: ""; }
+    .compare { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); font-size: 14px; }
+    .compare th, .compare td { text-align: left; vertical-align: top; padding: 16px; border-bottom: 1px solid var(--line); }
+    .compare th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .compare td:first-child { color: var(--blue-dark); font-weight: 800; }
+    details { background: var(--panel); border: 1px solid var(--line); margin-top: 10px; }
+    summary { cursor: pointer; padding: 17px 20px; font-weight: 800; list-style-position: inside; }
+    details div { padding: 0 20px 20px; color: var(--muted); }
+    .closing { padding: 72px 0 100px; display: grid; grid-template-columns: 1fr .8fr; gap: 50px; align-items: end; }
+    .closing h2 { max-width: 650px; }
+    .closing p { color: var(--muted); }
+    footer { padding: 20px 0 28px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; gap: 20px; }
+    @media (max-width: 820px) {
+      .shell { width: min(100% - 28px, 680px); }
+      .navlinks { display: none; }
+      .hero, .split, .closing { grid-template-columns: 1fr; gap: 34px; }
+      .hero { padding-top: 54px; }
+      .flow, .roles { grid-template-columns: 1fr; }
+      .flow-step { min-height: auto; } .flow-step:not(:last-child)::after { content: "↓"; top: auto; right: 18px; bottom: -20px; }
+      .policy { grid-template-columns: 1fr; } .policy-step { border-right: 0; border-bottom: 1px solid var(--line); min-height: auto; } .policy-step:last-child { border-bottom: 0; }
+      .policy-step::after { content: "↓"; }
+      .compare { display: block; overflow-x: auto; }
+      footer { display: block; } footer span { display: block; margin-top: 7px; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .button { transition: none; } }
+  </style>
+</head>
+<body>
+  <div class="topline"></div>
+  <div class="credit">感谢作者提供的思路：<a href="https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/edit?tab=t.0" target="_blank" rel="noreferrer">Thoughts on a TypeSafe coding agent</a>。本文把它转译成 jet 当前实现的通俗说明。</div>
+  <header class="shell">
+    <nav aria-label="主导航">
+      <a class="brand" href="#top"><img src="logo.svg" alt="jet logo">jet / DESIGN NOTES</a>
+      <div class="navlinks"><a href="#flow">一次请求</a><a href="#context">上下文</a><a href="#safety">安全</a><a href="#map">代码地图</a></div>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="shell hero">
+      <div>
+        <div class="kicker">A visual technical guide · v0.1</div>
+        <h1>让大模型只看<br><em>真正重要的东西。</em></h1>
+        <p class="lead">jet 是一个 coding agent：用轻量 judge 做判断，用大模型完成工作，用代码守住上下文、权限和验证边界。</p>
+        <div class="hero-actions"><a class="button primary" href="#flow">从一次请求开始</a><a class="button" href="DESIGN.md">阅读 Markdown 原文</a></div>
+      </div>
+      <div class="hero-diagram" aria-label="judge、worker 和 code 的协作图">
+        <div class="orbit"></div><div class="orbit two"></div>
+        <div class="node judge"><strong>JUDGE</strong><small>判断 / 路由 / 验证</small></div>
+        <div class="node worker"><strong>WORKER LLM</strong><small>写代码 / 回答问题</small></div>
+        <div class="node code"><strong>JET CODE</strong><small>预算 / 权限 / 状态</small></div>
+      </div>
+    </section>
+
+    <section class="section" id="flow"><div class="shell">
+      <div class="section-head"><div class="kicker">01 / The loop</div><h2>一次请求，发生了什么？</h2><p>它不是把聊天记录无限加长，而是每一步都从持久化状态中重新组装一个合适的工作窗口。</p></div>
+      <div class="flow">
+        <article class="flow-step"><div class="number">01</div><h3>保存状态</h3><p>用户请求、工具结果、计划节点都成为 SQLite 中的 chunk。</p></article>
+        <article class="flow-step"><div class="number">02</div><h3>选择上下文</h3><p>judge 判断哪些历史需要隐藏、备注、摘要或全文。</p></article>
+        <article class="flow-step"><div class="number">03</div><h3>选择工具</h3><p>所有工具都有简介，只有本步可能用到的工具获得完整 schema。</p></article>
+        <article class="flow-step"><div class="number">04</div><h3>执行工作</h3><p>worker LLM 流式输出；策略检查后才真正执行写入或命令。</p></article>
+        <article class="flow-step"><div class="number">05</div><h3>验证结果</h3><p>把目标、答案和证据交给验证器，失败时有限重试，绝不无限循环。</p></article>
+      </div>
+    </div></section>
+
+    <section class="section" id="context"><div class="shell">
+      <div class="section-head"><div class="kicker">02 / RLCD</div><h2>历史不会被压扁，<br>只是暂时换一种呈现。</h2><p>普通摘要会覆盖旧信息。jet 保留原文，把“摘要”当成某一次请求的临时视图；下一步仍可以重新取回全文。</p></div>
+      <div class="split">
+        <div class="panel"><h3>Chunk tree</h3><p>每个事实都有自己的身份、类型、顺序和父节点。上下文是从这棵树上挑出来的。</p><div class="chunk-tree"><div class="chunk"><b>USER</b><span>修复登录测试</span><i></i></div><div class="chunk"><b>TOOL</b><span>pytest 的失败输出</span><i></i></div><div class="chunk"><b>SUBGOAL</b><span>定位 token 过期逻辑</span><i></i></div></div></div>
+        <div class="panel"><h3>四种注意力等级</h3><p>分数由 judge 提供，阈值由代码控制。预算足够时不压缩；只有真的超预算才收缩内容。</p><div class="levels"><div class="level"><strong>隐藏</strong><span>与当前目标无关，暂不放进 prompt。</span></div><div class="level"><strong>一行备注</strong><span>只需要知道它存在和结论。</span></div><div class="level"><strong>摘要</strong><span>相关，但不需要每个细节。</span></div><div class="level"><strong>全文</strong><span>关键证据、当前任务和 pinned 内容。</span></div></div></div>
+      </div>
+    </div></section>
+
+    <section class="section"><div class="shell">
+      <div class="section-head"><div class="kicker">03 / Division of labor</div><h2>三种角色，三种擅长。</h2><p>把“判断”和“创造”拆开，才不会让昂贵的大模型处理每一个琐碎选择。</p></div>
+      <div class="roles"><article class="role"><code>CHEAP + FREQUENT</code><h3>Judge</h3><p>做结构化判断：相关性、工具路由、计划门控、权限建议、完成验证。</p></article><article class="role"><code>EXPENSIVE + FOCUSED</code><h3>Worker</h3><p>读取精简后的上下文，写代码、调用工具、回答用户。只把成本花在真正的工作上。</p></article><article class="role"><code>DETERMINISTIC</code><h3>Code</h3><p>拥有阈值、预算、递归深度、权限规则、重复调用拒绝和停止条件。</p></article></div>
+    </div></section>
+
+    <section class="section" id="safety"><div class="shell">
+      <div class="section-head"><div class="kicker">04 / Safety boundary</div><h2>模型可以建议，<br>不能偷偷放行。</h2><p>对于写文件和执行命令，决策是单向收紧的。确定性规则永远先于模型意见。</p></div>
+      <div class="policy"><div class="policy-step"><strong>① 确定性规则</strong><span>拦截 sudo、危险递归删除、远程内容直接 pipe 到 shell 等明确风险。</span></div><div class="policy-step"><strong>② Judge 安全意见</strong><span>发现规则没覆盖到的潜在泄漏、破坏或越权风险时，只能把结果收紧。</span></div><div class="policy-step"><strong>③ 人工确认</strong><span>Ask 模式下交给用户确认；没有 approver 时默认拒绝，失败关闭。</span></div></div>
+    </div></section>
+
+    <section class="section"><div class="shell">
+      <div class="section-head"><div class="kicker">05 / Why it matters</div><h2>创新不在某个名词，<br>而在边界的组合。</h2><p>这些机制单独看都不陌生，真正的差异是它们被放进了同一个可观察、可限制、可恢复的循环。</p></div>
+      <table class="compare"><thead><tr><th>问题</th><th>常见做法</th><th>jet 的做法</th><th>得到什么</th></tr></thead><tbody><tr><td>上下文太长</td><td>覆盖旧摘要</td><td>保留 chunk，按步选择视图</td><td>细节可恢复</td></tr><tr><td>工具太多</td><td>发送所有 schema</td><td>简介常驻，schema 按需注入</td><td>更少噪声</td></tr><tr><td>模型不可靠</td><td>让模型自行决定</td><td>代码拥有策略和边界</td><td>失败可解释</td></tr><tr><td>答案是否完成</td><td>相信最后一句话</td><td>对照目标、答案和证据验证</td><td>少做无根据承诺</td></tr></tbody></table>
+    </div></section>
+
+    <section class="section" id="map"><div class="shell">
+      <div class="section-head"><div class="kicker">06 / Open the hood</div><h2>想深入时，去看这些文件。</h2><p>可视化页面讲概念；下面的 Markdown 和源代码负责精确细节。</p></div>
+      <details open><summary>上下文如何选择？</summary><div><code>src/jet/context/attention.py</code> 负责打分和四级呈现；<code>src/jet/context/builder.py</code> 负责 token budget、协议安全的消息分组和最终 prompt。</div></details>
+      <details><summary>计划为什么不会拖慢简单任务？</summary><div><code>src/jet/context/decompose.py</code> 先用 judge 判断是否需要计划，并与第一步生成并发；计划还有深度、总节点数、去重和可执行性边界。</div></details>
+      <details><summary>一次工具调用如何被记录？</summary><div><code>src/jet/agent/loop.py</code> 负责执行、持久化和重复调用拒绝；<code>src/jet/policy/permissions.py</code> 负责规则、judge 意见和人工审批。</div></details>
+      <details><summary>如何知道 agent 有没有真的完成？</summary><div><code>src/jet/agent/verify.py</code> 同时支持 judge 与独立 LLM 验证；结果写入 trace，格式错误或 provider 不可用时明确标记为 inconclusive。</div></details>
+    </div></section>
+
+    <section class="shell closing"><div><div class="kicker">The short version</div><h2>把完整案例文件留在架子上，每次只递给模型真正需要的几页。</h2></div><div><p>这就是 jet 的核心：持久化状态 + 轻量判断 + 聚焦执行 + 证据验证。便宜的概率性建议，被确定性的代码边界包住。</p><a class="button primary" href="../README.md">回到 README</a></div></section>
+  </main>
+  <footer class="shell"><span>jet / visual design notes</span><span>Source of truth: <a href="DESIGN.md">docs/DESIGN.md</a></span></footer>
+</body>
+</html>
